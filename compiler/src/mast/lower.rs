@@ -526,6 +526,75 @@ impl<'a> Lowerer<'a> {
     }
 
     // ==========================================
+    //            Lambda Lifting
+    // ==========================================
+
+    fn lower_lambda_expr(
+        &mut self,
+        params: &[ast::FuncParam],
+        body: &Expr,
+        concrete_ty: TypeId,
+        subst_map: &HashMap<SymbolId, TypeId>,
+    ) -> MastExprKind {
+        let mono_id = self.new_mono_id();
+
+        // 1. 生成独一无二的内部函数名，直接映射到 C ABI
+        let lambda_name = format!("__kern_lambda_{}", mono_id.0);
+
+        // 2. 从 TypeId 提取确切的签名
+        let (param_tys, ret_ty) = if let TypeKind::Function { params, ret, .. } =
+            self.ctx.type_registry.get(concrete_ty)
+        {
+            (params.clone(), *ret)
+        } else {
+            unreachable!()
+        };
+
+        let mut mast_params = Vec::new();
+        for (i, p) in params.iter().enumerate() {
+            mast_params.push(MastParam {
+                name: p.name,
+                ty: param_tys[i],
+            });
+        }
+
+        // 暂时“屏蔽”外部所有的局部变量
+        // 通过将 local_types 替换为全新的栈，Lambda 内部在降级时将绝对看不见外部变量。
+        let saved_local_types = std::mem::take(&mut self.local_types);
+
+        // 为 Lambda 开启自己独有的局部作用域
+        self.local_types.push(HashMap::new());
+        for p in &mast_params {
+            self.local_types.last_mut().unwrap().insert(p.name, p.ty);
+        }
+
+        // 3. 降级 Lambda 的函数体 (Block)
+        let body_block = self.lower_block_as_body(body, subst_map, ret_ty);
+
+        self.local_types.pop();
+
+        // 恢复外部的作用域
+        self.local_types = saved_local_types;
+
+        // 4. 将提取出的逻辑打包成一个全局的 MastFunction
+        let mast_fn = MastFunction {
+            id: mono_id,
+            name: lambda_name,
+            params: mast_params,
+            ret_ty,
+            body: Some(body_block),
+            is_extern: false,
+            is_variadic: false,
+        };
+
+        // 强势插入到模块的顶层函数列表中
+        self.module.functions.push(mast_fn);
+
+        // 5. 在原地返回一个指向该新函数的指针引用
+        MastExprKind::FuncRef(mono_id)
+    }
+
+    // ==========================================
     //          Expression Lowering Dispatcher
     // ==========================================
 
@@ -558,7 +627,6 @@ impl<'a> Lowerer<'a> {
             ExprKind::Bool(val) => MastExprKind::Bool(*val),
             ExprKind::String(s) => self.lower_string_literal(s, expr.span),
             ExprKind::Identifier(name) => {
-                // [FIX 3]: 优先检查是否为函数，规避外部导入函数在当前作用域找不到的问题
                 let expr_ty = self
                     .ctx
                     .node_types
@@ -572,7 +640,26 @@ impl<'a> Lowerer<'a> {
                     let mono_id = self.instantiate_function(fn_id, &fn_args);
                     MastExprKind::FuncRef(mono_id)
                 } else {
-                    self.lower_identifier(*name)
+                    let kind = self.lower_identifier(*name);
+
+                    // 检测是否属于非法闭包捕获
+                    if let MastExprKind::Var(v) = kind {
+                        let mut found = false;
+                        for scope in self.local_types.iter().rev() {
+                            if scope.contains_key(&v) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            let var_str = self.ctx.resolve(v).to_string();
+                            self.ctx.struct_error(expr.span, "closures cannot capture environmental variables in Kern")
+                                .with_hint(format!("variable `{}` belongs to an outer scope", var_str))
+                                .with_hint("Kern anonymous functions compile directly to static C function pointers")
+                                .emit();
+                        }
+                    }
+                    kind
                 }
             }
 
@@ -646,6 +733,11 @@ impl<'a> Lowerer<'a> {
                 default_case,
             } => self.lower_switch(target, cases, default_case.as_deref(), subst_map, exp_ty),
             ExprKind::Match { target, arms } => self.lower_match(target, arms, subst_map, exp_ty),
+            ExprKind::Lambda {
+                params,
+                ret_type: _,
+                body,
+            } => self.lower_lambda_expr(params, body, concrete_ty, subst_map),
             ExprKind::Block { .. } => {
                 MastExprKind::Block(self.lower_block_as_body(expr, subst_map, exp_ty))
             }
