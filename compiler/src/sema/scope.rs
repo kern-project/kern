@@ -17,6 +17,7 @@ pub enum SymbolKind {
     Struct,    // 结构体定义
     Enum,      // 枚举定义
     Union,     // 联合体定义
+    Adt,       // 代数数据类型定义
     Trait,     // 特征定义
     Module,    // 模块
     TypeAlias, // 类型别名

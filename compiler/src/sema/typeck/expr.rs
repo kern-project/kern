@@ -104,6 +104,9 @@ impl<'a> ExprChecker<'a> {
                 expected_ty,
                 expr.span,
             ),
+            ExprKind::Match { target, arms } => {
+                self.check_match_expr(target, arms, expected_ty, expr.span)
+            }
             ExprKind::For {
                 init,
                 cond,
@@ -1561,6 +1564,7 @@ impl<'a> ExprChecker<'a> {
         span: Span,
     ) -> TypeId {
         let exp_norm = self.strip_mut(expected);
+        let is_adt = matches!(self.ctx.type_registry.get(exp_norm), TypeKind::Adt(..));
 
         match kind {
             ast::DataLiteralKind::Array(elems) => {
@@ -1570,9 +1574,21 @@ impl<'a> ExprChecker<'a> {
                 self.check_repeat_literal(value, count, expected, exp_norm, span)
             }
             ast::DataLiteralKind::Struct(init_fields) => {
-                self.check_struct_or_union_literal(init_fields, expected, exp_norm, span)
+                // 如果是 ADT，走变体载荷初始化；否则走 Struct/Union
+                if is_adt {
+                    self.check_adt_literal(init_fields, expected, exp_norm, span)
+                } else {
+                    self.check_struct_or_union_literal(init_fields, expected, exp_norm, span)
+                }
             }
-            ast::DataLiteralKind::Scalar(inner) => self.check_scalar_literal(inner, expected),
+            ast::DataLiteralKind::Scalar(inner) => {
+                // 如果是 ADT 且是标量字面量（如 `.{ None }`），走无载荷变体检查
+                if is_adt {
+                    self.check_adt_empty_literal(inner, expected, exp_norm, span)
+                } else {
+                    self.check_scalar_literal(inner, expected)
+                }
+            }
         }
     }
 
@@ -1790,6 +1806,237 @@ impl<'a> ExprChecker<'a> {
         expected
     }
 
+    // ==========================================
+    //            ADT & Pattern Matching
+    // ==========================================
+
+    /// 处理带有负载的 ADT 初始化，例如 `Result.{ Ok: 10 }`
+    fn check_adt_literal(
+        &mut self,
+        init_fields: &[ast::StructFieldInit],
+        expected: TypeId,
+        exp_norm: TypeId,
+        span: Span,
+    ) -> TypeId {
+        let (def_id, generic_args) = if let TypeKind::Adt(id, args) = self.ctx.type_registry.get(exp_norm) {
+            (*id, args.clone())
+        } else {
+            unreachable!()
+        };
+
+        let adt_def = match &self.ctx.defs[def_id.0 as usize] {
+            Def::Adt(a) => a.clone(),
+            _ => unreachable!(),
+        };
+
+        if init_fields.len() != 1 {
+            self.ctx.struct_error(span, "ADT literal must specify exactly one variant").emit();
+            return TypeId::ERROR;
+        }
+
+        let init_f = &init_fields[0];
+        let variant = adt_def.variants.iter().find(|v| v.name == init_f.name);
+
+        if let Some(v) = variant {
+            if let Some(payload_ast) = &v.payload_type {
+                // 1. 获取变体声明的负载类型
+                let mut payload_ty = self.ctx.node_types.get(&payload_ast.id).copied().unwrap_or(TypeId::ERROR);
+
+                // 2. 泛型替换 (例如将 `Option[T]` 的 `T` 替换为 `i32`)
+                if !adt_def.generics.is_empty() && !generic_args.is_empty() {
+                    let mut map = std::collections::HashMap::new();
+                    for (i, param) in adt_def.generics.iter().enumerate() {
+                        map.insert(param.name, generic_args[i]);
+                    }
+                    let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+                    payload_ty = subst.substitute(payload_ty);
+                }
+
+                // 3. 递归校验并强制转换用户提供的值
+                let val_ty = self.check_expr(&init_f.value, Some(payload_ty));
+                self.check_coercion(init_f.span, payload_ty, val_ty);
+            } else {
+                let v_str = self.ctx.resolve(v.name).to_string();
+                self.ctx.struct_error(init_f.span, format!("variant `{}` does not take a payload", v_str))
+                    .with_hint(format!("initialize it as `.{{ {} }}` instead", v_str))
+                    .emit();
+            }
+        } else {
+            let v_str = self.ctx.resolve(init_f.name);
+            let adt_str = self.ctx.resolve(adt_def.name);
+            self.ctx.struct_error(init_f.span, format!("variant `{}` not found in ADT `{}`", v_str, adt_str)).emit();
+        }
+
+        expected
+    }
+
+    /// 处理无负载的 ADT 初始化，例如 `Option.{ None }`
+    fn check_adt_empty_literal(
+        &mut self,
+        inner: &Expr,
+        expected: TypeId,
+        exp_norm: TypeId,
+        span: Span,
+    ) -> TypeId {
+        let variant_name = if let ExprKind::Identifier(id) = &inner.kind {
+            *id
+        } else {
+            self.ctx.struct_error(inner.span, "expected a simple variant name for empty ADT literal").emit();
+            return TypeId::ERROR;
+        };
+
+        let def_id = if let TypeKind::Adt(id, _) = self.ctx.type_registry.get(exp_norm) {
+            *id
+        } else {
+            unreachable!()
+        };
+
+        let adt_def = match &self.ctx.defs[def_id.0 as usize] {
+            Def::Adt(a) => a.clone(),
+            _ => unreachable!(),
+        };
+
+        if let Some(v) = adt_def.variants.iter().find(|v| v.name == variant_name) {
+            if v.payload_type.is_some() {
+                let v_str = self.ctx.resolve(variant_name).to_string();
+                self.ctx.struct_error(span, format!("variant `{}` requires a payload", v_str))
+                    .with_hint(format!("initialize it as `.{{ {}: value }}`", v_str))
+                    .emit();
+            }
+        } else {
+            let v_str = self.ctx.resolve(variant_name);
+            let adt_str = self.ctx.resolve(adt_def.name);
+            self.ctx.struct_error(span, format!("variant `{}` not found in ADT `{}`", v_str, adt_str)).emit();
+        }
+
+        expected
+    }
+
+    /// 核心 Match 检查逻辑：环境提取与详尽性检查
+    fn check_match_expr(
+        &mut self,
+        target: &Expr,
+        arms: &[ast::MatchArm],
+        expected_ty: Option<TypeId>,
+        span: Span,
+    ) -> TypeId {
+        let target_ty = self.check_expr(target, None);
+        let norm_target = self.strip_mut(target_ty);
+
+        if norm_target == TypeId::ERROR {
+            for arm in arms { self.check_expr(&arm.body, None); }
+            return TypeId::ERROR;
+        }
+
+        let (def_id, generic_args) = if let TypeKind::Adt(id, args) = self.ctx.type_registry.get(norm_target) {
+            (*id, args.clone())
+        } else {
+            let target_ty_str = self.ctx.ty_to_string(target_ty);
+            self.ctx.struct_error(target.span, "match expression target must be an ADT")
+                .with_hint(format!("found type `{}`", target_ty_str))
+                .emit();
+            for arm in arms { self.check_expr(&arm.body, None); }
+            return TypeId::ERROR;
+        };
+
+        let adt_def = match &self.ctx.defs[def_id.0 as usize] {
+            Def::Adt(a) => a.clone(),
+            _ => unreachable!(),
+        };
+
+        let mut common_ret_ty = expected_ty;
+        let mut handled_variants = std::collections::HashSet::new();
+        let mut has_catch_all = false;
+
+        for arm in arms {
+            // 🌟 护城河：为每个匹配分支开启独立的作用域，避免解包变量跨分支污染
+            self.ctx.scopes.enter_scope(); 
+
+            match &arm.pattern {
+                ast::MatchPattern::Variant { target_type, variant_name, binding, span: pat_span } => {
+                    // 如果用户写了显式类型前缀 `Result[i32, i32].Ok`，校验它是否与实际目标类型一致
+                    if let Some(explicit_ty_ast) = target_type {
+                        let mut resolver = TypeResolver::new(self.ctx);
+                        let scope = resolver.ctx.scopes.current_scope_id().unwrap();
+                        let explicit_ty = resolver.resolve_type(explicit_ty_ast, scope);
+                        self.check_coercion(*pat_span, norm_target, explicit_ty);
+                    }
+
+                    if let Some(v) = adt_def.variants.iter().find(|v| v.name == *variant_name) {
+                        handled_variants.insert(*variant_name);
+
+                        if let Some(bind_name) = binding {
+                            if let Some(payload_ast) = &v.payload_type {
+                                let mut payload_ty = self.ctx.node_types.get(&payload_ast.id).copied().unwrap_or(TypeId::ERROR);
+                                
+                                // 处理泛型替换
+                                if !adt_def.generics.is_empty() && !generic_args.is_empty() {
+                                    let mut map = std::collections::HashMap::new();
+                                    for (i, param) in adt_def.generics.iter().enumerate() {
+                                        map.insert(param.name, generic_args[i]);
+                                    }
+                                    let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+                                    payload_ty = subst.substitute(payload_ty);
+                                }
+                                
+                                // 🌟 核心：将解包出来的变量注册到当前分支作用域中
+                                let info = SymbolInfo {
+                                    kind: SymbolKind::Var,
+                                    node_id: arm.body.id, 
+                                    type_id: payload_ty,
+                                    def_id: None,
+                                    span: *pat_span,
+                                    is_pub: false,
+                                };
+                                let _ = self.ctx.scopes.define(*bind_name, info);
+                            } else {
+                                self.ctx.struct_error(*pat_span, format!("variant `{}` has no payload, but a binding was provided", self.ctx.resolve(*variant_name))).emit();
+                            }
+                        } else {
+                            if v.payload_type.is_some() {
+                                self.ctx.struct_error(*pat_span, format!("variant `{}` requires a binding for its payload", self.ctx.resolve(*variant_name)))
+                                    .with_hint("use the syntax `.Variant: name =>` to extract the data")
+                                    .emit();
+                            }
+                        }
+                    } else {
+                        self.ctx.struct_error(*pat_span, format!("variant `{}` not found in ADT `{}`", self.ctx.resolve(*variant_name), self.ctx.resolve(adt_def.name))).emit();
+                    }
+                }
+                ast::MatchPattern::CatchAll(_) => {
+                    has_catch_all = true;
+                }
+            }
+
+            let body_ty = self.check_expr(&arm.body, common_ret_ty);
+            if common_ret_ty.is_none() {
+                common_ret_ty = Some(body_ty);
+            } else {
+                self.check_coercion(arm.body.span, common_ret_ty.unwrap(), body_ty);
+            }
+
+            self.ctx.scopes.exit_scope(); // 清理当前分支的环境
+        }
+
+        // 详尽性检查
+        if !has_catch_all {
+            let mut missing = Vec::new();
+            for v in &adt_def.variants {
+                if !handled_variants.contains(&v.name) {
+                    missing.push(self.ctx.resolve(v.name).to_string());
+                }
+            }
+            if !missing.is_empty() {
+                self.ctx.struct_error(span, "match expression is not exhaustive")
+                    .with_hint(format!("missing variants: {}", missing.join(", ")))
+                    .with_hint("ensure all ADT variants are handled, or add an `else =>` catch-all branch")
+                    .emit();
+            }
+        }
+
+        common_ret_ty.unwrap_or(TypeId::VOID)
+    }
+
     pub fn strip_mut(&self, ty: TypeId) -> TypeId {
         let norm = self.ctx.type_registry.normalize(ty);
         if let TypeKind::Mut(inner) = self.ctx.type_registry.get(norm) {
@@ -1979,6 +2226,17 @@ impl<'a> ExprChecker<'a> {
                 gl == cl && self.unify(ge, ce, map)
             }
             (TypeKind::Def(g_id, g_args), TypeKind::Def(c_id, c_args)) if g_id == c_id => {
+                if g_args.len() != c_args.len() {
+                    return false;
+                }
+                for (ga, ca) in g_args.iter().zip(c_args.iter()) {
+                    if !self.unify(*ga, *ca, map) {
+                        return false;
+                    }
+                }
+                true
+            }
+            (TypeKind::Adt(g_id, g_args), TypeKind::Adt(c_id, c_args)) if g_id == c_id => {
                 if g_args.len() != c_args.len() {
                     return false;
                 }

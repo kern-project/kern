@@ -243,6 +243,31 @@ impl<'a> TypeResolver<'a> {
                 self.ctx.scopes.set_current_scope(parent_scope);
                 self.ctx.scopes.update_type(g.name, val_ty);
             }
+            Def::Adt(a) => {
+                self.ctx.scopes.set_current_scope(parent_scope);
+                let adt_scope = self.ctx.scopes.enter_scope();
+
+                // 绑定泛型参数，比如 Option[T] 里的 T
+                self.bind_generics(&a.generics, adt_scope);
+
+                // 解析所有变体的负载类型
+                for variant in &a.variants {
+                    if let Some(payload_ty) = &variant.payload_type {
+                        self.resolve_type(payload_ty, adt_scope);
+                    }
+                }
+                
+                self.ctx.scopes.exit_scope();
+                
+                // 生成基础类型的 TypeId (不带泛型实参的形式)
+                let adt_ty = self
+                    .ctx
+                    .type_registry
+                    .intern(TypeKind::Adt(item_id, Vec::new()));
+                
+                self.ctx.scopes.set_current_scope(parent_scope);
+                self.ctx.scopes.update_type(a.name, adt_ty);
+            }
             _ => {} // Module 自身无需在此解析
         }
     }
@@ -499,6 +524,12 @@ impl<'a> TypeResolver<'a> {
                     .type_registry
                     .intern(TypeKind::Def(def_id, resolved_generics))
             }
+            SymbolKind::Adt => {
+                let def_id = final_sym.def_id.unwrap();
+                self.ctx
+                    .type_registry
+                    .intern(TypeKind::Adt(def_id, resolved_generics))
+            }
             SymbolKind::Trait => {
                 let def_id = final_sym.def_id.unwrap();
                 self.ctx
@@ -621,7 +652,13 @@ impl<'a> TypeResolver<'a> {
             SymbolKind::Static => "static variable",
             SymbolKind::Function => "function",
             SymbolKind::Module => "module",
-            _ => "symbol",
+            SymbolKind::Struct => "struct",
+            SymbolKind::Enum => "enum",
+            SymbolKind::Union => "union",
+            SymbolKind::Adt => "algebraic data type", 
+            SymbolKind::Trait => "trait",
+            SymbolKind::TypeAlias => "type alias",
+            SymbolKind::TypeParam => "type parameter",
         }
     }
 }

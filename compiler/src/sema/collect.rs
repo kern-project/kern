@@ -321,6 +321,17 @@ impl<'a> Collector<'a> {
                     span: decl.span,
                 })
             }
+            TypeKind::Adt { variants } => {
+                sym_kind = SymbolKind::Adt;
+                Def::Adt(AdtDef {
+                    id: def_id,
+                    name: decl.name,
+                    vis,
+                    generics: generics.to_vec(),
+                    variants: variants.clone(),
+                    span: decl.span,
+                })
+            }
             TypeKind::Trait { fields } => {
                 sym_kind = SymbolKind::Trait;
                 Def::Trait(TraitDef {

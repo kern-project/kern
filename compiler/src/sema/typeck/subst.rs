@@ -72,6 +72,14 @@ impl<'a> Substituter<'a> {
                 let new_args = args.into_iter().map(|a| self.substitute(a)).collect();
                 self.registry.intern(TypeKind::Def(def_id, new_args))
             }
+            TypeKind::Adt(def_id, args) => {
+                let new_args = args.into_iter().map(|a| self.substitute(a)).collect();
+                self.registry.intern(TypeKind::Adt(def_id, new_args))
+            }
+            TypeKind::AdtPayload(def_id, args) => {
+                let new_args = args.into_iter().map(|a| self.substitute(a)).collect();
+                self.registry.intern(TypeKind::AdtPayload(def_id, new_args))
+            }
             TypeKind::FnDef(def_id, args) => {
                 let new_args = args.into_iter().map(|a| self.substitute(a)).collect();
                 self.registry.intern(TypeKind::FnDef(def_id, new_args))

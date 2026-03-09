@@ -35,6 +35,7 @@ pub enum Def {
     Struct(StructDef),
     Union(UnionDef),
     Enum(EnumDef),
+    Adt(AdtDef),
     Trait(TraitDef),
     Impl(ImplDef),
     Global(GlobalDef),
@@ -49,6 +50,7 @@ impl Def {
             Def::Struct(d) => Some(d.name),
             Def::Union(d) => Some(d.name),
             Def::Enum(d) => Some(d.name),
+            Def::Adt(d) => Some(d.name),
             Def::Trait(d) => Some(d.name),
             Def::Global(d) => Some(d.name),
             Def::TypeAlias(d) => Some(d.name),
@@ -135,6 +137,17 @@ pub struct EnumDef {
     pub generics: Vec<ast::GenericParam>,
     pub backing_type: Option<Box<ast::TypeNode>>,
     pub variants: Vec<ast::EnumVariant>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdtDef {
+    pub id: DefId,
+    pub name: SymbolId,
+    pub vis: Visibility,
+    pub generics: Vec<ast::GenericParam>,
+    // 变体列表：记录变体名和可选的负载类型 (未 Resolve 的 AST 类型)
+    pub variants: Vec<ast::AdtVariant>,
     pub span: Span,
 }
 

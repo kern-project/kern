@@ -294,6 +294,7 @@ impl<'a> ImportResolver<'a> {
             Def::Trait(d) => d.vis,
             Def::Global(d) => d.vis,
             Def::TypeAlias(d) => d.vis,
+            Def::Adt(d) => d.vis,
             Def::Module(_) => Visibility::Public, // 模块本身的可见性通常由其导出方式决定，默认为 Pub
             Def::Impl(_) => return true,          // Impl 块没有直接的可见性概念
         };

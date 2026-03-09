@@ -62,6 +62,14 @@ pub enum TypeKind {
     /// 这样设计是为了处理递归类型 (e.g., struct Node { next: *Node })
     Def(DefId, Vec<TypeId>),
 
+    /// 代数数据类型 (ADT)
+    /// 存储其 DefId 以及可能绑定的泛型参数
+    Adt(DefId, Vec<TypeId>),
+
+    /// 专门用于表示 ADT 在底层的物理 Union 负载 (Tag 之后的部分)
+    /// 依然绑定原 ADT 的 DefId 和泛型
+    AdtPayload(DefId, Vec<TypeId>),
+
     /// 特征对象 (Trait Object)
     /// 内存布局：胖指针 { data_ptr: *mut void, vtable: *mut VTable }
     TraitObject(DefId, Vec<TypeId>),
