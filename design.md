@@ -13,8 +13,7 @@
 **[Experimental Features (Unstable)](#experimental-features-unstable)**
 
    9. [Algebraic Data Types (ADT) and Pattern Matching](#9-algebraic-data-types-adt-and-pattern-matching)
-   10. [Classes and Component Polymorphism](#10-classes-and-component-polymorphism)
-   11. [Stateless Anonymous Functions (Lambdas)](#11-stateless-anonymous-functions-lambdas)
+   10. [Stateless Anonymous Functions (Lambdas)](#11-stateless-anonymous-functions-lambdas)
 ---
 
 ## 1. Core Philosophy and Manifesto
@@ -500,109 +499,11 @@ match (res) {
 * **Nested Matches**: `match` expressions evaluate to a value, allowing them to be bound directly to variables (e.g., `let x = match (res) { ... };`).
 * **Empty Variants**: For variants that carry no data payload (e.g., `None`), the colon and binding name are simply omitted (e.g., `.None => { ... }`).
 
-## 10. Classes and Component Polymorphism
-
-> *RFC: Thick Objects for GUI/VFS (Pending Real-world Validation)*
-
-While Kern’s `trait` system provides type-level polymorphism via external static VTables, certain domains (e.g., GUI frameworks, state machines, file operation tables) require **instance-level polymorphism**. Kern addresses this with the `class` keyword, which implements a "Thick Object" model.
-
-### 10.1 Memory Layout and Internal Methods
-
-A `class` is fundamentally a `struct` that allows an inline `impl` block. The compiler automatically translates the methods defined within this `impl` block into **physical function pointer fields** embedded directly within the instance's memory layout.
-
-```kern
-type Widget = class {
-    width: i32,
-    
-    // The compiler implicitly inserts a hidden function pointer:
-    // `draw: fn(*mut Self) void` into the Widget's memory layout.
-    impl *mut Self {
-        fn draw() void { 
-            printf("Base Widget Draw\n\0" as *u8); 
-        }
-    }
-};
-
-```
-
-### 10.2 Single Inheritance
-
-Kern `class` types support **strict single inheritance** using the `:` operator. This guarantees that the base class memory layout always occupies offset `0` of the child class. This physical constraint completely eliminates the diamond inheritance problem and avoids any implicit pointer offset arithmetic at runtime.
-
-```kern
-type Button: Widget = class {
-    color: u32,
-    
-    impl *mut Self {
-        // Implicit Override: Defining a method with the same name as the base 
-        // overwrites the inherited function pointer during initialization.
-        fn draw() void { 
-            printf("Button Draw: %d\n\0" as *u8, self.color); 
-        }
-        
-        fn click() void { 
-            printf("Clicked\n\0" as *u8); 
-        }
-    }
-};
-
-```
-
-### 10.3 Flattened Initialization and Casting
-
-Initialization of a child class requires explicitly providing all fields (both inherited and native) in a flattened `T.{ ... }` literal.
-
-Because the memory offset of the base class is guaranteed to be `0`, upcasting is a zero-cost, transparent operation.
-
-```kern
-// 1. Flattened Initialization (no abstraction leak of a "base" keyword)
-let btn = mut Button.{ 
-    width: 100, 
-    color: 0xFF0000 
-};
-
-// 2. Safe, Zero-Cost Pointer Upcasting
-let w_ptr = btn.& as *mut Widget;   
-
-// 3. Dynamic Dispatch
-// Executes the Button's overridden logic, as the function pointer 
-// inside the struct was replaced during initialization.
-w_ptr.draw(); 
-
-```
-
-**Interactions and Edge Cases**:
-
-* **Field Shadowing**: Child classes cannot declare data fields with the same name as inherited base fields. This is a strict compilation error to prevent ambiguity.
-* **Inline Trait Implementation (The Bridge)**: A `class` can implement a `trait` directly within its body using `impl *mut Self : TraitName { ... }`. This elegantly bridges instance-level and type-level polymorphism without code duplication.
-
-```kern
-type Display = trait {
-    draw: fn() void,
-};
-
-type Widget = class {
-    width: i32,
-    
-    // Implements the trait AND populates the class's internal function pointers.
-    impl *mut Self : Display {
-        fn draw() void { 
-            printf("Widget Draw\n\0" as *u8); 
-        }
-    }
-};
-
-```
-
-* **Trampoline VTables**: When an inline trait is implemented, the compiler generates a static VTable for the trait object whose methods act as "trampolines." When a trait object (e.g., `mut Display`) invokes `.draw()`, the static VTable safely delegates the call to the physical function pointer stored inside the specific `class` instance. This guarantees that if a subclass overrides the method, trait objects will always execute the correct, most-derived logic.
-
----
-
-## 11. Stateless Anonymous Functions (Lambdas)
+## 10. Stateless Anonymous Functions (Lambdas)
 
 To support inline callbacks and default trait implementations without violating Kern's strict memory rules, the language supports stateless anonymous functions.
 
-### 11.1 Strict Statelessness
+### 10.1 Strict Statelessness
 
 Anonymous functions use the `fn(...) ReturnType { ... }` syntax.
 Crucially, Kern **strictly forbids environmental capturing (closures)**. An anonymous function cannot access local variables from its enclosing scope. This physical limitation guarantees that anonymous functions compile down to pure, static function pointers (`fn`), entirely preventing use-after-free bugs caused by stack-allocated environments escaping their scope.
@@ -619,7 +520,7 @@ arr.sort(fn(a: i32, b: i32) bool {
 
 *Note: If state capture is required, developers must explicitly define a `class` (Thick Object) to manage the memory of the captured variables.*
 
-### 11.2 Interaction with Traits (Default Implementations)
+### 10.2 Interaction with Traits (Default Implementations)
 
 Anonymous functions act as the mechanism for providing default implementations for `trait` methods. Since a `trait` is logically a template for a VTable, providing a default method is semantically identical to providing a default value for a struct field.
 
