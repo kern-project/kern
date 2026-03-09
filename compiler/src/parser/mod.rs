@@ -809,6 +809,7 @@ impl<'a> Parser<'a> {
                 self.parse_typed_data_init_prefix(token)
             }
 
+            TokenType::Fn => self.parse_lambda_expr(span),
             _ => {
                 let text = self.context.source_manager.slice_source(span).to_string();
                 self.add_error(span, format!("Expected expression, found '{}'", text));
@@ -1102,6 +1103,40 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenType::DotLBrace)?;
         self.parse_data_init(Some(Box::new(type_node)), span)
+    }
+
+    fn parse_lambda_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        // `fn` 关键字在 parse_prefix 中已经被消费了，此时 start_span 就是 `fn` 的 span
+
+        // 1. 解析参数列表 (复用现有的函数参数解析器)
+        let (params, is_variadic) = self.parse_func_params()?;
+
+        // 护城河：匿名函数作为一种明确的运行时闭包对象，不允许使用 C 风格的可变参数
+        if is_variadic {
+            self.add_error(
+                start_span,
+                "Anonymous functions (lambdas) cannot be variadic".to_string(),
+            );
+        }
+
+        // 2. 解析显式的返回值类型
+        let ret_type = self.parse_type()?;
+
+        // 3. 解析函数体 (强制要求是大括号 Block)
+        let brace_token = self.expect(TokenType::LBrace)?;
+        let body = self.parse_block_expr(brace_token.span)?;
+
+        let end_span = body.span;
+
+        Ok(Expr {
+            id: self.new_id(),
+            span: start_span.to(end_span),
+            kind: ExprKind::Lambda {
+                params,
+                ret_type: Box::new(ret_type),
+                body: Box::new(body),
+            },
+        })
     }
 
     // --- Infix Sub-Routines ---

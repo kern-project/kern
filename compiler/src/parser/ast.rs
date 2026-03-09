@@ -346,6 +346,14 @@ pub enum ExprKind {
 
     /// 代表 `self`
     SelfValue,
+
+    /// 无状态匿名函数 (Lambda)
+    /// 语法: `fn(a: i32, b: i32) bool { return a < b; }`
+    Lambda {
+        params: Vec<FuncParam>,
+        ret_type: Box<TypeNode>,
+        body: Box<Expr>, // 必定是一个 Block 表达式
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

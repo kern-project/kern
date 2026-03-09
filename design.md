@@ -13,7 +13,7 @@
 **[Experimental Features (Unstable)](#experimental-features-unstable)**
 
    9. [Algebraic Data Types (ADT) and Pattern Matching](#9-algebraic-data-types-adt-and-pattern-matching)
-   10. [Stateless Anonymous Functions (Lambdas)](#11-stateless-anonymous-functions-lambdas)
+   10. [Stateless Anonymous Functions (Lambdas)](#10-stateless-anonymous-functions-lambdas)
 ---
 
 ## 1. Core Philosophy and Manifesto
