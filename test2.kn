@@ -25,7 +25,7 @@ fn process(val: i32) i32 {
     };
 
     let sum = mut i32.{0};
-    for (let i = mut usize.{0}; i < multiplier; i += 1) {
+    for (let i = 0; i < multiplier; i += 1) {
         sum += val;
     }
 

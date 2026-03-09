@@ -20,6 +20,15 @@ fn main() i32 {
     // 3. 测试同模块下的普通调用
     let sum = math.add(p.x, p.y);
     printf("Sum of coordinates: %d\n\n\0" as *u8, sum);
+
+    // sizeof 测试
+    let size = @sizeof[math.Point]();
+    printf("Size of point: %d\n\0" as *u8, size);
+
+    // Cast 测试
+    let small = mut u8.{255};
+    let big = @intCast[u8, i32](small);
+    printf("Big: %d\n\0" as *u8, big);
     
     0
 }

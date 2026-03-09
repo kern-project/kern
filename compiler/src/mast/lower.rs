@@ -1022,19 +1022,58 @@ impl<'a> Lowerer<'a> {
             if let Def::Function(f) = &self.ctx.defs[fn_id.0 as usize] {
                 if f.is_intrinsic {
                     let name_str = self.ctx.resolve(f.name);
-                    // 在 MAST 阶段，将内置函数的“伪调用”直接降级为原生的运算指令
-                    if name_str == "@floatCast" {
+
+                    // 1. 编译期常量折叠: @sizeof[T]() -> usize
+                    if name_str == "@sizeof" {
+                        // 从函数调用的泛型参数中提取 T
+                        let target_ty = if let TypeKind::FnDef(_, args) = self.ctx.type_registry.get(callee_mast.ty) {
+                            args[0] // T 是第一个泛型参数
+                        } else {
+                            TypeId::ERROR
+                        };
+                        let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
+                        let size = ce.compute_type_size(target_ty);
+                        return MastExprKind::Integer(size as u128);
+                    } 
+                    // 2. 整数转型: @intCast[T, U](val) -> U
+                    else if name_str == "@intCast" {
+                        let operand = arg_masts.remove(0);
+                        
+                        // 从函数调用的泛型参数中提取目标类型 U
+                        let target_ty = if let TypeKind::FnDef(_, args) = self.ctx.type_registry.get(callee_mast.ty) {
+                            args[1] // U 是第二个泛型参数
+                        } else { 
+                            TypeId::ERROR 
+                        };
+                        
+                        // 动态判定 Trunc / ZeroExt / SignExt
+                        let cast_kind = self.determine_int_cast_kind(operand.ty, target_ty);
+                        return MastExprKind::Cast {
+                            kind: cast_kind,
+                            operand: Box::new(operand),
+                        };
+                    } 
+                    // 3. 浮点精度转换: @floatCast[T, U](val) -> U
+                    else if name_str == "@floatCast" {
                         return MastExprKind::Cast {
                             kind: MastCastKind::FloatCast,
                             operand: Box::new(arg_masts.remove(0)),
                         };
-                    } else if name_str == "@intToFloat" {
+                    } 
+                    // 4. 整型转浮点: @intToFloat[T, U](val) -> U
+                    else if name_str == "@intToFloat" {
                         return MastExprKind::Cast {
                             kind: MastCastKind::IntToFloat,
                             operand: Box::new(arg_masts.remove(0)),
                         };
+                    } 
+                    // 5. 浮点转整型: @floatToInt[T, U](val) -> U
+                    else if name_str == "@floatToInt" {
+                        return MastExprKind::Cast {
+                            kind: MastCastKind::FloatToInt,
+                            operand: Box::new(arg_masts.remove(0)),
+                        };
                     }
-                    // TODO: 未来你可以在这里继续添加 @sizeof 等内置函数的拦截展开逻辑
                 }
             }
 
