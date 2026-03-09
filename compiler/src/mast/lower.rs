@@ -313,6 +313,98 @@ impl<'a> Lowerer<'a> {
         id
     }
 
+    fn instantiate_adt(&mut self, def_id: crate::sema::ty::DefId, args: &[TypeId]) -> MonoId {
+        let key = (def_id, args.to_vec());
+        if let Some(&id) = self.mono_cache.get(&key) {
+            return id;
+        }
+
+        let wrapper_id = self.new_mono_id();
+        let payload_union_id = self.new_mono_id();
+        self.mono_cache.insert(key, wrapper_id);
+
+        let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] {
+            a.clone()
+        } else {
+            unreachable!()
+        };
+
+        let mut mangled_name = self.ctx.resolve(def.name).to_string();
+        for arg in args { 
+            mangled_name.push_str(&format!("_{}", arg.0)); 
+        }
+
+        let mut subst_map = HashMap::new();
+        for (i, param) in def.generics.iter().enumerate() {
+            subst_map.insert(param.name, args[i]);
+        }
+
+        // 1. 构建内部的 Payload Union
+        let mut union_fields = Vec::new();
+        let mut largest_idx = 0;
+        let mut max_size = 0;
+        
+        for (idx, variant) in def.variants.iter().enumerate() {
+            let field_ty = if let Some(payload_ast) = &variant.payload_type {
+                let raw_ty = self.ctx.node_types.get(&payload_ast.id).copied().unwrap_or(TypeId::ERROR);
+                let conc_ty = {
+                    let mut subst = Substituter::new(&mut self.ctx.type_registry, &subst_map);
+                    subst.substitute(raw_ty)
+                };
+                conc_ty
+            } else {
+                TypeId::VOID // LLVM 中对于空 Union 的处理可以是 i8 或者忽略
+            };
+            
+            union_fields.push(MastField {
+                name: variant.name,
+                ty: field_ty,
+            });
+            
+            if field_ty != TypeId::VOID && field_ty != TypeId::ERROR {
+                let size = {
+                    let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
+                    ce.compute_type_size(field_ty)
+                };
+                
+                if size > max_size {
+                    max_size = size;
+                    largest_idx = idx;
+                }
+            }
+        }
+
+        self.module.structs.push(MastStruct {
+            id: payload_union_id,
+            name: format!("{}_payload", mangled_name),
+            fields: union_fields,
+            is_extern: false,
+            is_union: true,
+            largest_field_idx: largest_idx,
+        });
+
+        // 2. 构建外部的 Wrapper Struct (Tag + Union)
+        // TODO: 默认使用 u32 作为 Tag，足以应对百万级变体
+        let tag_ty = TypeId::U32; 
+        let union_ty = self.ctx.type_registry.intern(
+            TypeKind::AdtPayload(def_id, args.to_vec())
+        );
+
+        self.module.structs.push(MastStruct {
+            id: wrapper_id,
+            name: mangled_name,
+            fields: vec![
+                MastField { name: self.ctx.intern("__tag"), ty: tag_ty },
+                MastField { name: self.ctx.intern("__payload"), ty: union_ty },
+            ],
+            is_extern: false,
+            is_union: false,
+            largest_field_idx: 0,
+        });
+
+        wrapper_id
+    }
+
     fn lower_global(&mut self, g: &crate::sema::def::GlobalDef) {
         let id = *self
             .global_map
@@ -541,6 +633,9 @@ impl<'a> Lowerer<'a> {
                 cases,
                 default_case,
             } => self.lower_switch(target, cases, default_case.as_deref(), subst_map, exp_ty),
+            ExprKind::Match { target, arms } => {
+                self.lower_match(target, arms, subst_map, exp_ty)
+            }
             ExprKind::Block { .. } => {
                 MastExprKind::Block(self.lower_block_as_body(expr, subst_map, exp_ty))
             }
@@ -1183,6 +1278,33 @@ impl<'a> Lowerer<'a> {
         match literal {
             ast::DataLiteralKind::Struct(fields) => {
                 let base_ty = self.strip_mut_modifier(concrete_ty);
+                // 处理 ADT 变体初始化
+                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone() {
+                    let mono_id = self.instantiate_adt(def_id, &gen_args);
+                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
+                    
+                    let init_f = &fields[0]; // Sema 已经保证了只有一个
+                    
+                    // 找到这是第几个变体 (作为 Tag)
+                    let tag_val = def.variants.iter().position(|v| v.name == init_f.name).unwrap() as u128;
+                    
+                    // 解析负载表达式
+                    let mut variant_subst_map = HashMap::new();
+                    for (i, param) in def.generics.iter().enumerate() {
+                        variant_subst_map.insert(param.name, gen_args[i]);
+                    }
+                    let raw_payload_ty = self.ctx.node_types.get(&def.variants[tag_val as usize].payload_type.as_ref().unwrap().id).copied().unwrap();
+                    let conc_payload_ty = Substituter::new(&mut self.ctx.type_registry, &variant_subst_map).substitute(raw_payload_ty);
+
+                    let payload_expr = self.lower_expr(&init_f.value, subst_map, Some(conc_payload_ty));
+                    
+                    return MastExprKind::AdtInit {
+                        adt_struct_id: mono_id,
+                        tag_value: tag_val,
+                        payload: Box::new(payload_expr),
+                    };
+                }
+
                 let (def_id, gen_args) =
                     if let TypeKind::Def(id, args) = self.ctx.type_registry.get(base_ty) {
                         (*id, args.clone())
@@ -1282,6 +1404,21 @@ impl<'a> Lowerer<'a> {
                 MastExprKind::ArrayInit(vec![elem; array_len as usize])
             }
             ast::DataLiteralKind::Scalar(inner) => {
+                // 处理无负载 ADT 初始化: `.{ None }`
+                let base_ty = self.strip_mut_modifier(concrete_ty);
+                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone() {
+                    let mono_id = self.instantiate_adt(def_id, &gen_args);
+                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
+                    let variant_name = if let ExprKind::Identifier(id) = &inner.kind { *id } else { unreachable!() };
+                    
+                    let tag_val = def.variants.iter().position(|v| v.name == variant_name).unwrap() as u128;
+                    
+                    return MastExprKind::AdtInit {
+                        adt_struct_id: mono_id,
+                        tag_value: tag_val,
+                        payload: Box::new(MastExpr::new(TypeId::VOID, MastExprKind::Undef, inner.span)),
+                    };
+                }
                 self.lower_expr(inner, subst_map, Some(concrete_ty)).kind
             }
         }
@@ -1517,6 +1654,118 @@ impl<'a> Lowerer<'a> {
         let def_case = default_case.map(|b| self.lower_block_as_body(b, subst_map, exp_ty));
         MastExprKind::Switch {
             target: Box::new(t),
+            cases: mast_cases,
+            default_case: def_case,
+        }
+    }
+
+    fn lower_match(
+        &mut self,
+        target: &Expr,
+        arms: &[ast::MatchArm],
+        subst_map: &HashMap<SymbolId, TypeId>,
+        exp_ty: TypeId,
+    ) -> MastExprKind {
+        // 1. 降级目标表达式
+        let t = self.lower_expr(target, subst_map, None);
+        let base_ty = self.strip_mut_modifier(t.ty);
+        
+        let (def_id, gen_args) = if let TypeKind::Adt(id, args) = self.ctx.type_registry.get(base_ty).clone() {
+            (id, args)
+        } else {
+            unreachable!()
+        };
+        let mono_id = self.instantiate_adt(def_id, &gen_args);
+        let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
+
+        // 2. 提取 Tag (相当于 target.__tag)
+        let tag_access = MastExpr::new(
+            TypeId::U32,
+            MastExprKind::FieldAccess {
+                lhs: Box::new(t.clone()),
+                struct_id: mono_id,
+                field_idx: 0, // 第 0 个字段是 __tag
+            },
+            target.span,
+        );
+
+        // 3. 构建 Switch 分支
+        let mut mast_cases = Vec::new();
+        let mut def_case = None;
+
+        for arm in arms {
+            match &arm.pattern {
+                ast::MatchPattern::Variant { variant_name, binding, .. } => {
+                    let tag_idx = def.variants.iter().position(|v| v.name == *variant_name).unwrap();
+                    
+                    self.local_types.push(HashMap::new());
+                    let mut arm_stmts = Vec::new();
+
+                    // 如果有绑定 (例如 `.Ok: val`)，我们要在执行块前隐式生成提取动作
+                    if let Some(bind_name) = binding {
+                        let variant_def = &def.variants[tag_idx];
+                        
+                        // 准备泛型环境
+                        let mut variant_subst_map = HashMap::new();
+                        for (i, param) in def.generics.iter().enumerate() {
+                            variant_subst_map.insert(param.name, gen_args[i]);
+                        }
+                        let raw_payload_ty = self.ctx.node_types.get(&variant_def.payload_type.as_ref().unwrap().id).copied().unwrap();
+                        let conc_payload_ty = Substituter::new(&mut self.ctx.type_registry, &variant_subst_map).substitute(raw_payload_ty);
+
+                        // 提取 Payload (相当于 target.__payload.as_Variant)
+                        // __payload 是 struct 的第 1 个字段
+                        let union_access = MastExpr::new(
+                            TypeId::VOID, // 中间类型无所谓
+                            MastExprKind::FieldAccess {
+                                lhs: Box::new(t.clone()),
+                                struct_id: mono_id,
+                                field_idx: 1, 
+                            },
+                            arm.span,
+                        );
+
+                        // 再从 Union 中通过字段索引提取具体的 Payload
+                        // 注意：Union的 MonoId 就是 `mono_id.0 + 1`，因为我们是连续分配的。
+                        let payload_extract = MastExpr::new(
+                            conc_payload_ty,
+                            MastExprKind::FieldAccess {
+                                lhs: Box::new(union_access),
+                                struct_id: MonoId(mono_id.0 + 1), // 指向 payload_union_id
+                                field_idx: tag_idx,
+                            },
+                            arm.span,
+                        );
+
+                        self.local_types.last_mut().unwrap().insert(*bind_name, conc_payload_ty);
+                        arm_stmts.push(MastStmt::Let {
+                            name: *bind_name,
+                            ty: conc_payload_ty,
+                            init: payload_extract,
+                        });
+                    }
+
+                    // 降级执行块，拼接到隐式提取语句之后
+                    let mut block = self.lower_block_as_body(&arm.body, subst_map, exp_ty);
+                    arm_stmts.append(&mut block.stmts);
+                    block.stmts = arm_stmts;
+
+                    self.local_types.pop();
+
+                    mast_cases.push(MastSwitchCase {
+                        values: vec![tag_idx as u128],
+                        body: block,
+                    });
+                }
+                ast::MatchPattern::CatchAll(_) => {
+                    def_case = Some(self.lower_block_as_body(&arm.body, subst_map, exp_ty));
+                }
+            }
+        }
+
+        // 把 Match 降维打击成普通的 Switch 表达式！
+        MastExprKind::Switch {
+            target: Box::new(tag_access),
             cases: mast_cases,
             default_case: def_case,
         }

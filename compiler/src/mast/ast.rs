@@ -212,6 +212,16 @@ pub enum MastExprKind {
     // --- 9. 执行块 ---
     /// 作为一个整体表达式执行的代码块 (用于嵌套作用域和 Defer 展开)
     Block(MastBlock),
+
+    // --- 10. ADT 原语 (实际上背后是 Struct+Union 布局) ---
+    /// 构建一个 ADT 实例。
+    /// 在物理上，LLVM 把它当作一个 `{ TagType, UnionType }` 的结构体。
+    AdtInit {
+        adt_struct_id: MonoId, // 降级后的包装结构体 ID
+        tag_value: u128,       // 具体的枚举鉴别器
+        /// 变体的具体负载，如果没有负载就是 Undef
+        payload: Box<MastExpr>, 
+    },
 }
 
 #[derive(Debug, Clone)]
