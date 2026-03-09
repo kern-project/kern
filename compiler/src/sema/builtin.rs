@@ -403,15 +403,34 @@ impl<'a> BuiltinInjector<'a> {
         let id1 = self.ctx.next_node_id();
         let id2 = self.ctx.next_node_id();
 
-        let c_int1 = TypeNode { id: id1, span: Default::default(), kind: ast::TypeKind::Infer };
-        let c_int2 = TypeNode { id: id2, span: Default::default(), kind: ast::TypeKind::Infer };
-        
-        let trait_ty = self.ctx.type_registry.intern(TypeKind::Def(int_trait_id, vec![]));
+        let c_int1 = TypeNode {
+            id: id1,
+            span: Default::default(),
+            kind: ast::TypeKind::Infer,
+        };
+        let c_int2 = TypeNode {
+            id: id2,
+            span: Default::default(),
+            kind: ast::TypeKind::Infer,
+        };
+
+        let trait_ty = self
+            .ctx
+            .type_registry
+            .intern(TypeKind::Def(int_trait_id, vec![]));
         self.ctx.node_types.insert(c_int1.id, trait_ty);
         self.ctx.node_types.insert(c_int2.id, trait_ty);
 
-        let param_t = GenericParam { name: self.ctx.intern("T"), constraints: vec![c_int1], span: Default::default() };
-        let param_u = GenericParam { name: self.ctx.intern("U"), constraints: vec![c_int2], span: Default::default() };
+        let param_t = GenericParam {
+            name: self.ctx.intern("T"),
+            constraints: vec![c_int1],
+            span: Default::default(),
+        };
+        let param_u = GenericParam {
+            name: self.ctx.intern("U"),
+            constraints: vec![c_int2],
+            span: Default::default(),
+        };
 
         let val_param_id = self.ctx.next_node_id();
         let ret_id = self.ctx.next_node_id();
@@ -421,23 +440,54 @@ impl<'a> BuiltinInjector<'a> {
             self.ctx.node_types.insert(val_param_id, t_ty);
             self.ctx.node_types.insert(ret_id, u_ty);
             self.ctx.type_registry.intern(TypeKind::Function {
-                params: vec![t_ty], ret: u_ty, is_variadic: false,
+                params: vec![t_ty],
+                ret: u_ty,
+                is_variadic: false,
             })
         };
 
         let func_def = FunctionDef {
-            id: def_id, name: name_id, vis: Visibility::Public, parent: None,
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
             generics: vec![param_t, param_u],
-            params: vec![ast::FuncParam { name: self.ctx.intern("val"), type_node: TypeNode { id: val_param_id, span: Default::default(), kind: ast::TypeKind::Infer }, span: Default::default() }],
-            ret_type: TypeNode { id: ret_id, span: Default::default(), kind: ast::TypeKind::Infer },
-            body: None, is_extern: false, is_variadic: false, is_intrinsic: true,
-            resolved_sig: Some(sig_ty), span: Default::default(),
+            params: vec![ast::FuncParam {
+                name: self.ctx.intern("val"),
+                type_node: TypeNode {
+                    id: val_param_id,
+                    span: Default::default(),
+                    kind: ast::TypeKind::Infer,
+                },
+                span: Default::default(),
+            }],
+            ret_type: TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast::TypeKind::Infer,
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
         };
 
         self.ctx.add_def(Def::Function(func_def));
         let root_scope = crate::sema::scope::ScopeId(0);
         self.ctx.scopes.set_current_scope(root_scope);
-        let info = SymbolInfo { kind: SymbolKind::Function, node_id: self.ctx.next_node_id(), type_id: self.ctx.type_registry.intern(TypeKind::FnDef(def_id, vec![])), def_id: Some(def_id), span: Default::default(), is_pub: true };
+        let info = SymbolInfo {
+            kind: SymbolKind::Function,
+            node_id: self.ctx.next_node_id(),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
+            def_id: Some(def_id),
+            span: Default::default(),
+            is_pub: true,
+        };
         let _ = self.ctx.scopes.define(name_id, info);
     }
 
@@ -449,14 +499,40 @@ impl<'a> BuiltinInjector<'a> {
         let id1 = self.ctx.next_node_id();
         let id2 = self.ctx.next_node_id();
 
-        let c_float = TypeNode { id: id1, span: Default::default(), kind: ast::TypeKind::Infer };
-        let c_int = TypeNode { id: id2, span: Default::default(), kind: ast::TypeKind::Infer };
-        
-        self.ctx.node_types.insert(c_float.id, self.ctx.type_registry.intern(TypeKind::Def(float_trait_id, vec![])));
-        self.ctx.node_types.insert(c_int.id, self.ctx.type_registry.intern(TypeKind::Def(int_trait_id, vec![])));
+        let c_float = TypeNode {
+            id: id1,
+            span: Default::default(),
+            kind: ast::TypeKind::Infer,
+        };
+        let c_int = TypeNode {
+            id: id2,
+            span: Default::default(),
+            kind: ast::TypeKind::Infer,
+        };
 
-        let param_t = GenericParam { name: self.ctx.intern("T"), constraints: vec![c_float], span: Default::default() };
-        let param_u = GenericParam { name: self.ctx.intern("U"), constraints: vec![c_int], span: Default::default() };
+        self.ctx.node_types.insert(
+            c_float.id,
+            self.ctx
+                .type_registry
+                .intern(TypeKind::Def(float_trait_id, vec![])),
+        );
+        self.ctx.node_types.insert(
+            c_int.id,
+            self.ctx
+                .type_registry
+                .intern(TypeKind::Def(int_trait_id, vec![])),
+        );
+
+        let param_t = GenericParam {
+            name: self.ctx.intern("T"),
+            constraints: vec![c_float],
+            span: Default::default(),
+        };
+        let param_u = GenericParam {
+            name: self.ctx.intern("U"),
+            constraints: vec![c_int],
+            span: Default::default(),
+        };
 
         let val_param_id = self.ctx.next_node_id();
         let ret_id = self.ctx.next_node_id();
@@ -466,23 +542,54 @@ impl<'a> BuiltinInjector<'a> {
             self.ctx.node_types.insert(val_param_id, t_ty);
             self.ctx.node_types.insert(ret_id, u_ty);
             self.ctx.type_registry.intern(TypeKind::Function {
-                params: vec![t_ty], ret: u_ty, is_variadic: false,
+                params: vec![t_ty],
+                ret: u_ty,
+                is_variadic: false,
             })
         };
 
         let func_def = FunctionDef {
-            id: def_id, name: name_id, vis: Visibility::Public, parent: None,
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
             generics: vec![param_t, param_u],
-            params: vec![ast::FuncParam { name: self.ctx.intern("val"), type_node: TypeNode { id: val_param_id, span: Default::default(), kind: ast::TypeKind::Infer }, span: Default::default() }],
-            ret_type: TypeNode { id: ret_id, span: Default::default(), kind: ast::TypeKind::Infer },
-            body: None, is_extern: false, is_variadic: false, is_intrinsic: true,
-            resolved_sig: Some(sig_ty), span: Default::default(),
+            params: vec![ast::FuncParam {
+                name: self.ctx.intern("val"),
+                type_node: TypeNode {
+                    id: val_param_id,
+                    span: Default::default(),
+                    kind: ast::TypeKind::Infer,
+                },
+                span: Default::default(),
+            }],
+            ret_type: TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast::TypeKind::Infer,
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
         };
 
         self.ctx.add_def(Def::Function(func_def));
         let root_scope = crate::sema::scope::ScopeId(0);
         self.ctx.scopes.set_current_scope(root_scope);
-        let info = SymbolInfo { kind: SymbolKind::Function, node_id: self.ctx.next_node_id(), type_id: self.ctx.type_registry.intern(TypeKind::FnDef(def_id, vec![])), def_id: Some(def_id), span: Default::default(), is_pub: true };
+        let info = SymbolInfo {
+            kind: SymbolKind::Function,
+            node_id: self.ctx.next_node_id(),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
+            def_id: Some(def_id),
+            span: Default::default(),
+            is_pub: true,
+        };
         let _ = self.ctx.scopes.define(name_id, info);
     }
 }

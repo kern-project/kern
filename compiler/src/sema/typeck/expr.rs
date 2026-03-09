@@ -26,12 +26,10 @@ impl<'a> ExprChecker<'a> {
     pub fn check_expr(&mut self, expr: &Expr, expected_ty: Option<TypeId>) -> TypeId {
         let ty = match &expr.kind {
             // === 1. 基础字面量 ===
-            ExprKind::Integer(_) => expected_ty.unwrap_or_else(|| {
-                self.ctx.type_registry.intern(TypeKind::Mut(TypeId::USIZE))
-            }),
-            ExprKind::Float(_) => expected_ty.unwrap_or_else(|| {
-                self.ctx.type_registry.intern(TypeKind::Mut(TypeId::F32))
-            }),
+            ExprKind::Integer(_) => expected_ty
+                .unwrap_or_else(|| self.ctx.type_registry.intern(TypeKind::Mut(TypeId::USIZE))),
+            ExprKind::Float(_) => expected_ty
+                .unwrap_or_else(|| self.ctx.type_registry.intern(TypeKind::Mut(TypeId::F32))),
             ExprKind::Bool(_) => TypeId::BOOL,
             ExprKind::Char(_) => TypeId::U32,
             ExprKind::String(_) => self.ctx.type_registry.intern(TypeKind::Slice(TypeId::U8)),
