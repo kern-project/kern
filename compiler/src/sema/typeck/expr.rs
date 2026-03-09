@@ -121,6 +121,12 @@ impl<'a> ExprChecker<'a> {
             ExprKind::GenericInstantiation { target, types } => {
                 self.check_generic_instantiation(target, types, expr.span)
             }
+
+            ExprKind::Lambda {
+                params,
+                ret_type,
+                body,
+            } => self.check_lambda(params, ret_type, body),
         };
 
         self.ctx.node_types.insert(expr.id, ty);
@@ -598,6 +604,77 @@ impl<'a> ExprChecker<'a> {
                 .type_registry
                 .intern(TypeKind::Def(def_id, arg_tys))
         }
+    }
+
+    fn check_lambda(
+        &mut self,
+        params: &[ast::FuncParam],
+        ret_type_node: &ast::TypeNode,
+        body: &Expr,
+    ) -> TypeId {
+        // 1. 解析参数类型和显式返回类型
+        let (param_tys, ret_ty) = {
+            let mut resolver = TypeResolver::new(self.ctx);
+            let current_scope = resolver.ctx.scopes.current_scope_id().unwrap();
+
+            let mut ptys = Vec::new();
+            for param in params {
+                ptys.push(resolver.resolve_type(&param.type_node, current_scope));
+            }
+            let rty = resolver.resolve_type(ret_type_node, current_scope);
+            (ptys, rty)
+        };
+
+        // 2. 注册该 Lambda 的物理类型
+        let func_ty = self.ctx.type_registry.intern(TypeKind::Function {
+            params: param_tys.clone(),
+            ret: ret_ty,
+            is_variadic: false, // 匿名函数绝对不可能是变长参数
+        });
+
+        // 3. 准备进入 Lambda 内部作用域
+        self.ctx.scopes.enter_scope();
+
+        // 注入参数到局部作用域
+        for (i, param) in params.iter().enumerate() {
+            let info = SymbolInfo {
+                kind: SymbolKind::Var,
+                node_id: self.ctx.next_node_id(),
+                type_id: param_tys[i],
+                def_id: None,
+                span: param.span,
+                is_pub: false,
+            };
+            let _ = self.ctx.scopes.define(param.name, info);
+        }
+
+        // 保存外部函数的返回上下文，防止内部 return 污染外部
+        let prev_return_type = self.current_return_type;
+        let prev_has_returned = self.has_returned;
+
+        // 设置当前 Lambda 的返回期望
+        self.current_return_type = Some(ret_ty);
+        self.has_returned = false;
+
+        // 4. 对 Lambda 内部的代码块进行类型检查
+        let body_ty = self.check_expr(body, Some(ret_ty));
+
+        // 如果内部没有调用过显式的 return，才需要强制约束 Block 的尾表达式类型；
+        // 如果内部已经 return 过了，Block 自身的 void 类型就不必与 ret_ty 强制匹配了。
+        if !self.has_returned {
+            self.check_coercion(body.span, ret_ty, body_ty);
+        } else if body_ty != TypeId::VOID && body_ty != TypeId::ERROR {
+            // 如果既有 return，又有隐式的尾表达式，校验一下尾表达式
+            self.check_coercion(body.span, ret_ty, body_ty);
+        }
+
+        // 恢复外部上下文
+        self.current_return_type = prev_return_type;
+        self.has_returned = prev_has_returned;
+
+        self.ctx.scopes.exit_scope();
+
+        func_ty
     }
 
     fn check_generic_bounds(
