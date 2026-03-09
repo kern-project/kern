@@ -1,0 +1,29 @@
+extern {
+    fn printf(fmt: *u8, ...) i32;
+}
+
+// 模拟一个接受函数指针作为回调的 C/底层 API
+pub fn execute_callback(val: i32, callback: fn(i32) i32) void {
+    let result = callback(val);
+    printf("Callback returned: %d\n\0" as *u8, result);
+}
+
+pub fn main() i32 {
+    printf("--- Testing Stateless Lambdas ---\n\0" as *u8);
+
+    // 1. 将匿名函数直接作为参数传递，没有变量名，所见即所得！
+    execute_callback(10, fn(x: i32) i32 {
+        return x * 2;
+    });
+
+    // 2. 将其绑定给变量后调用
+    let is_even = fn(x: i32) bool {
+        return (x % 2) == 0;
+    };
+
+    if (is_even(42)) {
+        printf("42 is even!\n\0" as *u8);
+    }
+
+    return 0;
+}
