@@ -1601,23 +1601,30 @@ impl<'a> Parser<'a> {
                 } else {
                     // 语法2: 带有显式前缀，尝试解析为 Type
                     let ty = self.parse_type()?;
-                    
+
                     if self.match_token(&[TokenType::Dot]) {
                         // 情况A: 带泛型的类型被截断，比如 `Result[i32, i32] . Ok`
                         let v_tok = self.expect(TokenType::Identifier)?;
                         variant_name = self.intern_token(v_tok);
                         target_type = Some(Box::new(ty));
-                    } else if let TypeKind::Path { mut segments, generics } = ty.kind {
+                    } else if let TypeKind::Path {
+                        mut segments,
+                        generics,
+                    } = ty.kind
+                    {
                         // 情况B: 无泛型，parse_type 会把 `ASTNode.Boolean` 整体当作路径吃掉
                         if generics.is_empty() && segments.len() >= 2 {
                             // 把最后一段弹出来当做变体名
-                            variant_name = segments.pop().unwrap(); 
-                            
+                            variant_name = segments.pop().unwrap();
+
                             // 剩下的重新组装回 Target Type
                             let remain_ty = TypeNode {
                                 id: self.new_id(),
                                 span: ty.span, // TODO: 近似
-                                kind: TypeKind::Path { segments, generics: vec![] },
+                                kind: TypeKind::Path {
+                                    segments,
+                                    generics: vec![],
+                                },
                             };
                             target_type = Some(Box::new(remain_ty));
                         } else {
@@ -1647,8 +1654,8 @@ impl<'a> Parser<'a> {
             };
 
             self.expect(TokenType::Arrow)?;
-            
-            let body = self.parse_switch_body()?; 
+
+            let body = self.parse_switch_body()?;
             self.match_token(&[TokenType::Comma]);
 
             arms.push(MatchArm {

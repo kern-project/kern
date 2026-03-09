@@ -220,7 +220,7 @@ pub enum MastExprKind {
         adt_struct_id: MonoId, // 降级后的包装结构体 ID
         tag_value: u128,       // 具体的枚举鉴别器
         /// 变体的具体负载，如果没有负载就是 Undef
-        payload: Box<MastExpr>, 
+        payload: Box<MastExpr>,
     },
 }
 

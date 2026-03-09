@@ -185,7 +185,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 // 如果 def_id 越界了，说明是在 Lowering 时生成的“伪 Union”
                 // 它的 def_id.0 其实就是 MonoId.0
                 if def_id.0 as usize >= self.ctx_defs.len() {
-                    return self.structs.get(&MonoId(def_id.0)).unwrap().as_basic_type_enum();
+                    return self
+                        .structs
+                        .get(&MonoId(def_id.0))
+                        .unwrap()
+                        .as_basic_type_enum();
                 }
 
                 let def = &self.ctx_defs[def_id.0 as usize];
@@ -231,7 +235,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             let llvm_struct = self.context.opaque_struct_type(&s.name);
             self.structs.insert(s.id, llvm_struct);
             if s.is_union {
-                self.union_ids.insert(s.id); 
+                self.union_ids.insert(s.id);
             }
         }
 
@@ -432,9 +436,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             MastExprKind::UnionInit {
                 union_id, value, ..
             } => self.compile_union_init(*union_id, value),
-            MastExprKind::AdtInit { adt_struct_id, tag_value, payload } => {
-                self.compile_adt_init(*adt_struct_id, *tag_value, payload)
-            }
+            MastExprKind::AdtInit {
+                adt_struct_id,
+                tag_value,
+                payload,
+            } => self.compile_adt_init(*adt_struct_id, *tag_value, payload),
             MastExprKind::ArrayInit(elems) => self.compile_array_init(elems, expected_llvm_ty),
             MastExprKind::FieldAccess {
                 lhs,
@@ -563,14 +569,23 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
     fn compile_union_init(&mut self, union_id: MonoId, value: &MastExpr) -> BasicValueEnum<'ctx> {
         let union_llvm_ty = *self.structs.get(&union_id).unwrap();
-        let alloca = self.builder.build_alloca(union_llvm_ty, "union_init").unwrap();
+        let alloca = self
+            .builder
+            .build_alloca(union_llvm_ty, "union_init")
+            .unwrap();
 
         let val = self.compile_expr(value);
         let val_ptr_ty = self.context.ptr_type(AddressSpace::default());
-        let casted_ptr = self.builder.build_bit_cast(alloca, val_ptr_ty, "union_bitcast").unwrap().into_pointer_value();
-        
+        let casted_ptr = self
+            .builder
+            .build_bit_cast(alloca, val_ptr_ty, "union_bitcast")
+            .unwrap()
+            .into_pointer_value();
+
         self.builder.build_store(casted_ptr, val).unwrap();
-        self.builder.build_load(union_llvm_ty.as_basic_type_enum(), alloca, "union_load").unwrap()
+        self.builder
+            .build_load(union_llvm_ty.as_basic_type_enum(), alloca, "union_load")
+            .unwrap()
     }
 
     fn compile_adt_init(
@@ -580,29 +595,50 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         payload: &MastExpr,
     ) -> BasicValueEnum<'ctx> {
         let struct_llvm_ty = *self.structs.get(&adt_struct_id).unwrap();
-        
-        let tag_llvm_ty = struct_llvm_ty.get_field_type_at_index(0).unwrap().into_int_type();
+
+        let tag_llvm_ty = struct_llvm_ty
+            .get_field_type_at_index(0)
+            .unwrap()
+            .into_int_type();
         let tag_val = tag_llvm_ty.const_int(tag_value as u64, false);
 
         let union_llvm_ty = struct_llvm_ty.get_field_type_at_index(1).unwrap();
 
         // 1. 组装 Payload Union
-        let union_alloca = self.builder.build_alloca(union_llvm_ty, "adt_union_init").unwrap();
-        
+        let union_alloca = self
+            .builder
+            .build_alloca(union_llvm_ty, "adt_union_init")
+            .unwrap();
+
         if payload.ty != TypeId::VOID && payload.ty != TypeId::ERROR {
             let payload_val = self.compile_expr(payload);
             // LLVM IR 类型安全强转：将 Union 指针转换为具体 Payload 类型的指针
             let payload_ptr_ty = self.context.ptr_type(AddressSpace::default());
-            let casted_ptr = self.builder.build_bit_cast(union_alloca, payload_ptr_ty, "union_bitcast").unwrap().into_pointer_value();
+            let casted_ptr = self
+                .builder
+                .build_bit_cast(union_alloca, payload_ptr_ty, "union_bitcast")
+                .unwrap()
+                .into_pointer_value();
             self.builder.build_store(casted_ptr, payload_val).unwrap();
         }
-        
-        let union_val = self.builder.build_load(union_llvm_ty, union_alloca, "adt_union_load").unwrap();
+
+        let union_val = self
+            .builder
+            .build_load(union_llvm_ty, union_alloca, "adt_union_load")
+            .unwrap();
 
         // 2. 组装最终的 ADT Struct
         let mut adt_struct = struct_llvm_ty.const_zero();
-        adt_struct = self.builder.build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag").unwrap().into_struct_value();
-        adt_struct = self.builder.build_insert_value(adt_struct, union_val, 1, "adt_insert_union").unwrap().into_struct_value();
+        adt_struct = self
+            .builder
+            .build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag")
+            .unwrap()
+            .into_struct_value();
+        adt_struct = self
+            .builder
+            .build_insert_value(adt_struct, union_val, 1, "adt_insert_union")
+            .unwrap()
+            .into_struct_value();
 
         adt_struct.into()
     }
@@ -639,12 +675,23 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         if is_union {
             // Union 读取：先将指针 Bitcast 为目标类型指针，再读取
             let target_ptr_ty = self.context.ptr_type(AddressSpace::default());
-            let casted_ptr = self.builder.build_bit_cast(struct_ptr, target_ptr_ty, "union_field_cast").unwrap().into_pointer_value();
-            
-            self.builder.build_load(expected_ty, casted_ptr, "union_field_load").unwrap()
+            let casted_ptr = self
+                .builder
+                .build_bit_cast(struct_ptr, target_ptr_ty, "union_field_cast")
+                .unwrap()
+                .into_pointer_value();
+
+            self.builder
+                .build_load(expected_ty, casted_ptr, "union_field_load")
+                .unwrap()
         } else {
-            let field_ptr = self.builder.build_struct_gep(*struct_llvm_ty, struct_ptr, field_idx as u32, "field_gep").unwrap();
-            self.builder.build_load(expected_ty, field_ptr, "field_load").unwrap()
+            let field_ptr = self
+                .builder
+                .build_struct_gep(*struct_llvm_ty, struct_ptr, field_idx as u32, "field_gep")
+                .unwrap();
+            self.builder
+                .build_load(expected_ty, field_ptr, "field_load")
+                .unwrap()
         }
     }
 

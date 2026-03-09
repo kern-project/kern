@@ -256,15 +256,15 @@ impl<'a> TypeResolver<'a> {
                         self.resolve_type(payload_ty, adt_scope);
                     }
                 }
-                
+
                 self.ctx.scopes.exit_scope();
-                
+
                 // 生成基础类型的 TypeId (不带泛型实参的形式)
                 let adt_ty = self
                     .ctx
                     .type_registry
                     .intern(TypeKind::Adt(item_id, Vec::new()));
-                
+
                 self.ctx.scopes.set_current_scope(parent_scope);
                 self.ctx.scopes.update_type(a.name, adt_ty);
             }
@@ -655,7 +655,7 @@ impl<'a> TypeResolver<'a> {
             SymbolKind::Struct => "struct",
             SymbolKind::Enum => "enum",
             SymbolKind::Union => "union",
-            SymbolKind::Adt => "algebraic data type", 
+            SymbolKind::Adt => "algebraic data type",
             SymbolKind::Trait => "trait",
             SymbolKind::TypeAlias => "type alias",
             SymbolKind::TypeParam => "type parameter",

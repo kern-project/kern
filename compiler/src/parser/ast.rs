@@ -173,9 +173,7 @@ pub enum TypeKind {
 
     /// 代数数据类型定义 (Algebraic Data Type)
     /// 例如: adt { Some: T, None }
-    Adt {
-        variants: Vec<AdtVariant>,
-    },
+    Adt { variants: Vec<AdtVariant> },
 
     /// 推导占位符 `_`
     Infer,
@@ -203,7 +201,7 @@ pub struct EnumVariant {
 pub struct AdtVariant {
     pub name: SymbolId,
     /// 负载类型。如果像 `None` 一样没有数据负载，则为 None
-    pub payload_type: Option<Box<TypeNode>>, 
+    pub payload_type: Option<Box<TypeNode>>,
     pub span: Span,
 }
 
@@ -409,7 +407,7 @@ pub struct MatchArm {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MatchPattern {
     /// ADT 变体匹配
-    /// 语法: `[TypeNode.]Variant [: binding]` 
+    /// 语法: `[TypeNode.]Variant [: binding]`
     /// 例子: `.Ok: val`, `Result[i32, i32].Err: code`, `.None`
     Variant {
         /// 可选的完整类型路径 (例如显式写出的 `Result[i32, i32]`)
@@ -421,7 +419,7 @@ pub enum MatchPattern {
         /// 整个 pattern 的 span
         span: Span,
     },
-    
+
     /// 捕获所有分支: `else =>`
     CatchAll(Span),
 }

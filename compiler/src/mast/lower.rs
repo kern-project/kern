@@ -330,8 +330,8 @@ impl<'a> Lowerer<'a> {
         };
 
         let mut mangled_name = self.ctx.resolve(def.name).to_string();
-        for arg in args { 
-            mangled_name.push_str(&format!("_{}", arg.0)); 
+        for arg in args {
+            mangled_name.push_str(&format!("_{}", arg.0));
         }
 
         let mut subst_map = HashMap::new();
@@ -343,10 +343,15 @@ impl<'a> Lowerer<'a> {
         let mut union_fields = Vec::new();
         let mut largest_idx = 0;
         let mut max_size = 0;
-        
+
         for (idx, variant) in def.variants.iter().enumerate() {
             let field_ty = if let Some(payload_ast) = &variant.payload_type {
-                let raw_ty = self.ctx.node_types.get(&payload_ast.id).copied().unwrap_or(TypeId::ERROR);
+                let raw_ty = self
+                    .ctx
+                    .node_types
+                    .get(&payload_ast.id)
+                    .copied()
+                    .unwrap_or(TypeId::ERROR);
                 let conc_ty = {
                     let mut subst = Substituter::new(&mut self.ctx.type_registry, &subst_map);
                     subst.substitute(raw_ty)
@@ -355,18 +360,18 @@ impl<'a> Lowerer<'a> {
             } else {
                 TypeId::VOID // LLVM 中对于空 Union 的处理可以是 i8 或者忽略
             };
-            
+
             union_fields.push(MastField {
                 name: variant.name,
                 ty: field_ty,
             });
-            
+
             if field_ty != TypeId::VOID && field_ty != TypeId::ERROR {
                 let size = {
                     let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
                     ce.compute_type_size(field_ty)
                 };
-                
+
                 if size > max_size {
                     max_size = size;
                     largest_idx = idx;
@@ -385,17 +390,24 @@ impl<'a> Lowerer<'a> {
 
         // 2. 构建外部的 Wrapper Struct (Tag + Union)
         // TODO: 默认使用 u32 作为 Tag，足以应对百万级变体
-        let tag_ty = TypeId::U32; 
-        let union_ty = self.ctx.type_registry.intern(
-            TypeKind::AdtPayload(def_id, args.to_vec())
-        );
+        let tag_ty = TypeId::U32;
+        let union_ty = self
+            .ctx
+            .type_registry
+            .intern(TypeKind::AdtPayload(def_id, args.to_vec()));
 
         self.module.structs.push(MastStruct {
             id: wrapper_id,
             name: mangled_name,
             fields: vec![
-                MastField { name: self.ctx.intern("__tag"), ty: tag_ty },
-                MastField { name: self.ctx.intern("__payload"), ty: union_ty },
+                MastField {
+                    name: self.ctx.intern("__tag"),
+                    ty: tag_ty,
+                },
+                MastField {
+                    name: self.ctx.intern("__payload"),
+                    ty: union_ty,
+                },
             ],
             is_extern: false,
             is_union: false,
@@ -633,9 +645,7 @@ impl<'a> Lowerer<'a> {
                 cases,
                 default_case,
             } => self.lower_switch(target, cases, default_case.as_deref(), subst_map, exp_ty),
-            ExprKind::Match { target, arms } => {
-                self.lower_match(target, arms, subst_map, exp_ty)
-            }
+            ExprKind::Match { target, arms } => self.lower_match(target, arms, subst_map, exp_ty),
             ExprKind::Block { .. } => {
                 MastExprKind::Block(self.lower_block_as_body(expr, subst_map, exp_ty))
             }
@@ -1279,25 +1289,48 @@ impl<'a> Lowerer<'a> {
             ast::DataLiteralKind::Struct(fields) => {
                 let base_ty = self.strip_mut_modifier(concrete_ty);
                 // 处理 ADT 变体初始化
-                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone() {
+                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone()
+                {
                     let mono_id = self.instantiate_adt(def_id, &gen_args);
-                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
-                    
+                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] {
+                        a.clone()
+                    } else {
+                        unreachable!()
+                    };
+
                     let init_f = &fields[0]; // Sema 已经保证了只有一个
-                    
+
                     // 找到这是第几个变体 (作为 Tag)
-                    let tag_val = def.variants.iter().position(|v| v.name == init_f.name).unwrap() as u128;
-                    
+                    let tag_val = def
+                        .variants
+                        .iter()
+                        .position(|v| v.name == init_f.name)
+                        .unwrap() as u128;
+
                     // 解析负载表达式
                     let mut variant_subst_map = HashMap::new();
                     for (i, param) in def.generics.iter().enumerate() {
                         variant_subst_map.insert(param.name, gen_args[i]);
                     }
-                    let raw_payload_ty = self.ctx.node_types.get(&def.variants[tag_val as usize].payload_type.as_ref().unwrap().id).copied().unwrap();
-                    let conc_payload_ty = Substituter::new(&mut self.ctx.type_registry, &variant_subst_map).substitute(raw_payload_ty);
+                    let raw_payload_ty = self
+                        .ctx
+                        .node_types
+                        .get(
+                            &def.variants[tag_val as usize]
+                                .payload_type
+                                .as_ref()
+                                .unwrap()
+                                .id,
+                        )
+                        .copied()
+                        .unwrap();
+                    let conc_payload_ty =
+                        Substituter::new(&mut self.ctx.type_registry, &variant_subst_map)
+                            .substitute(raw_payload_ty);
 
-                    let payload_expr = self.lower_expr(&init_f.value, subst_map, Some(conc_payload_ty));
-                    
+                    let payload_expr =
+                        self.lower_expr(&init_f.value, subst_map, Some(conc_payload_ty));
+
                     return MastExprKind::AdtInit {
                         adt_struct_id: mono_id,
                         tag_value: tag_val,
@@ -1406,17 +1439,34 @@ impl<'a> Lowerer<'a> {
             ast::DataLiteralKind::Scalar(inner) => {
                 // 处理无负载 ADT 初始化: `.{ None }`
                 let base_ty = self.strip_mut_modifier(concrete_ty);
-                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone() {
+                if let TypeKind::Adt(def_id, gen_args) = self.ctx.type_registry.get(base_ty).clone()
+                {
                     let mono_id = self.instantiate_adt(def_id, &gen_args);
-                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
-                    let variant_name = if let ExprKind::Identifier(id) = &inner.kind { *id } else { unreachable!() };
-                    
-                    let tag_val = def.variants.iter().position(|v| v.name == variant_name).unwrap() as u128;
-                    
+                    let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] {
+                        a.clone()
+                    } else {
+                        unreachable!()
+                    };
+                    let variant_name = if let ExprKind::Identifier(id) = &inner.kind {
+                        *id
+                    } else {
+                        unreachable!()
+                    };
+
+                    let tag_val = def
+                        .variants
+                        .iter()
+                        .position(|v| v.name == variant_name)
+                        .unwrap() as u128;
+
                     return MastExprKind::AdtInit {
                         adt_struct_id: mono_id,
                         tag_value: tag_val,
-                        payload: Box::new(MastExpr::new(TypeId::VOID, MastExprKind::Undef, inner.span)),
+                        payload: Box::new(MastExpr::new(
+                            TypeId::VOID,
+                            MastExprKind::Undef,
+                            inner.span,
+                        )),
                     };
                 }
                 self.lower_expr(inner, subst_map, Some(concrete_ty)).kind
@@ -1669,14 +1719,19 @@ impl<'a> Lowerer<'a> {
         // 1. 降级目标表达式
         let t = self.lower_expr(target, subst_map, None);
         let base_ty = self.strip_mut_modifier(t.ty);
-        
-        let (def_id, gen_args) = if let TypeKind::Adt(id, args) = self.ctx.type_registry.get(base_ty).clone() {
-            (id, args)
+
+        let (def_id, gen_args) =
+            if let TypeKind::Adt(id, args) = self.ctx.type_registry.get(base_ty).clone() {
+                (id, args)
+            } else {
+                unreachable!()
+            };
+        let mono_id = self.instantiate_adt(def_id, &gen_args);
+        let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] {
+            a.clone()
         } else {
             unreachable!()
         };
-        let mono_id = self.instantiate_adt(def_id, &gen_args);
-        let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] { a.clone() } else { unreachable!() };
 
         // 2. 提取 Tag (相当于 target.__tag)
         let tag_access = MastExpr::new(
@@ -1695,23 +1750,38 @@ impl<'a> Lowerer<'a> {
 
         for arm in arms {
             match &arm.pattern {
-                ast::MatchPattern::Variant { variant_name, binding, .. } => {
-                    let tag_idx = def.variants.iter().position(|v| v.name == *variant_name).unwrap();
-                    
+                ast::MatchPattern::Variant {
+                    variant_name,
+                    binding,
+                    ..
+                } => {
+                    let tag_idx = def
+                        .variants
+                        .iter()
+                        .position(|v| v.name == *variant_name)
+                        .unwrap();
+
                     self.local_types.push(HashMap::new());
                     let mut arm_stmts = Vec::new();
 
                     // 如果有绑定 (例如 `.Ok: val`)，我们要在执行块前隐式生成提取动作
                     if let Some(bind_name) = binding {
                         let variant_def = &def.variants[tag_idx];
-                        
+
                         // 准备泛型环境
                         let mut variant_subst_map = HashMap::new();
                         for (i, param) in def.generics.iter().enumerate() {
                             variant_subst_map.insert(param.name, gen_args[i]);
                         }
-                        let raw_payload_ty = self.ctx.node_types.get(&variant_def.payload_type.as_ref().unwrap().id).copied().unwrap();
-                        let conc_payload_ty = Substituter::new(&mut self.ctx.type_registry, &variant_subst_map).substitute(raw_payload_ty);
+                        let raw_payload_ty = self
+                            .ctx
+                            .node_types
+                            .get(&variant_def.payload_type.as_ref().unwrap().id)
+                            .copied()
+                            .unwrap();
+                        let conc_payload_ty =
+                            Substituter::new(&mut self.ctx.type_registry, &variant_subst_map)
+                                .substitute(raw_payload_ty);
 
                         // 提取 Payload (相当于 target.__payload.as_Variant)
                         // __payload 是 struct 的第 1 个字段
@@ -1720,7 +1790,7 @@ impl<'a> Lowerer<'a> {
                             MastExprKind::FieldAccess {
                                 lhs: Box::new(t.clone()),
                                 struct_id: mono_id,
-                                field_idx: 1, 
+                                field_idx: 1,
                             },
                             arm.span,
                         );
@@ -1737,7 +1807,10 @@ impl<'a> Lowerer<'a> {
                             arm.span,
                         );
 
-                        self.local_types.last_mut().unwrap().insert(*bind_name, conc_payload_ty);
+                        self.local_types
+                            .last_mut()
+                            .unwrap()
+                            .insert(*bind_name, conc_payload_ty);
                         arm_stmts.push(MastStmt::Let {
                             name: *bind_name,
                             ty: conc_payload_ty,

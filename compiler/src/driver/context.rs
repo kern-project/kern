@@ -210,7 +210,7 @@ impl Context {
             ty::TypeKind::Mut(inner) => format!("mut {}", self.ty_to_string(*inner)),
 
             // 具名类型：去 defs 里查真名，并拼接泛型
-            ty::TypeKind::Def(def_id, generics) 
+            ty::TypeKind::Def(def_id, generics)
             | ty::TypeKind::TraitObject(def_id, generics)
             | ty::TypeKind::Adt(def_id, generics) => {
                 let def = &self.defs[def_id.0 as usize];
@@ -230,15 +230,19 @@ impl Context {
 
             ty::TypeKind::AdtPayload(def_id, generics) => {
                 let def = &self.defs[def_id.0 as usize];
-                let name = def.name().map(|sym| self.resolve(sym)).unwrap_or("<anonymous>");
+                let name = def
+                    .name()
+                    .map(|sym| self.resolve(sym))
+                    .unwrap_or("<anonymous>");
                 if generics.is_empty() {
                     format!("{}::Payload", name)
                 } else {
-                    let gen_strs: Vec<String> = generics.iter().map(|g| self.ty_to_string(*g)).collect();
+                    let gen_strs: Vec<String> =
+                        generics.iter().map(|g| self.ty_to_string(*g)).collect();
                     format!("{}::Payload[{}]", name, gen_strs.join(", "))
                 }
             }
-            
+
             // 别名与占位符：打印名字，不展开底层目标（对用户更直观）
             ty::TypeKind::Alias(sym, _) => self.resolve(*sym).to_string(),
             ty::TypeKind::Param(sym) => self.resolve(*sym).to_string(),
