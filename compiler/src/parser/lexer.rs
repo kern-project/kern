@@ -569,6 +569,8 @@ fn resolve_keyword(text: &[u8]) -> TokenType {
         b"_" => TokenType::Underscore,
         b"Self" => TokenType::SelfType,
         b"self" => TokenType::SelfValue,
+        b"adt" => TokenType::Adt,
+        b"match" => TokenType::Match,
         _ => TokenType::Identifier,
     }
 }

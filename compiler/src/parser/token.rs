@@ -48,6 +48,8 @@ pub enum TokenType {
     Underscore,
     SelfType,
     SelfValue,
+    Adt,   // adt
+    Match, // match
 
     // === 运算符 ===
 

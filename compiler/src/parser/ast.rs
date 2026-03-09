@@ -171,6 +171,12 @@ pub enum TypeKind {
     /// 特征定义 (Trait)
     Trait { fields: Vec<StructFieldDef> },
 
+    /// 代数数据类型定义 (Algebraic Data Type)
+    /// 例如: adt { Some: T, None }
+    Adt {
+        variants: Vec<AdtVariant>,
+    },
+
     /// 推导占位符 `_`
     Infer,
 
@@ -190,6 +196,14 @@ pub struct StructFieldDef {
 pub struct EnumVariant {
     pub name: SymbolId,
     pub value: Option<Box<Expr>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdtVariant {
+    pub name: SymbolId,
+    /// 负载类型。如果像 `None` 一样没有数据负载，则为 None
+    pub payload_type: Option<Box<TypeNode>>, 
     pub span: Span,
 }
 
@@ -269,6 +283,10 @@ pub enum ExprKind {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Option<Box<Expr>>,
+    },
+    Match {
+        target: Box<Expr>,
+        arms: Vec<MatchArm>,
     },
     Switch {
         target: Box<Expr>,
@@ -377,6 +395,43 @@ impl SwitchPattern {
         match self {
             SwitchPattern::Value(expr) => expr.span,
             SwitchPattern::Range { start, end, .. } => start.span.to(end.span),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Expr, // 匹配成功后执行的表达式/块
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    /// ADT 变体匹配
+    /// 语法: `[TypeNode.]Variant [: binding]` 
+    /// 例子: `.Ok: val`, `Result[i32, i32].Err: code`, `.None`
+    Variant {
+        /// 可选的完整类型路径 (例如显式写出的 `Result[i32, i32]`)
+        target_type: Option<Box<TypeNode>>,
+        /// 变体名称 (例如 `Ok`, `None`)
+        variant_name: SymbolId,
+        /// 提取的数据绑定 (例如 `: val`)。如果变体无负载则为 None
+        binding: Option<SymbolId>,
+        /// 整个 pattern 的 span
+        span: Span,
+    },
+    
+    /// 捕获所有分支: `else =>`
+    CatchAll(Span),
+}
+
+impl MatchPattern {
+    /// 动态获取该模式的 Span
+    pub fn span(&self) -> Span {
+        match self {
+            MatchPattern::Variant { span, .. } => *span,
+            MatchPattern::CatchAll(span) => *span,
         }
     }
 }

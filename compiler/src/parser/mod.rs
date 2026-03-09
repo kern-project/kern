@@ -359,6 +359,7 @@ impl<'a> Parser<'a> {
             TokenType::Union => self.parse_struct_type(true),
             TokenType::Enum => self.parse_enum_type(),
             TokenType::Trait => self.parse_trait_type(),
+            TokenType::Adt => self.parse_adt_type(),
 
             _ => {
                 let token = self.peek();
@@ -685,6 +686,47 @@ impl<'a> Parser<'a> {
             kind: TypeKind::Trait { fields },
         })
     }
+
+    fn parse_adt_type(&mut self) -> ParseResult<TypeNode> {
+        let start_token = self.advance(); // 消费 'adt'
+        self.expect(TokenType::LBrace)?;
+
+        let mut variants = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let name_token = self.expect(TokenType::Identifier)?;
+            let name_id = self.intern_token(name_token);
+
+            let mut payload_type = None;
+            // 如果遇到冒号，说明有数据负载 (Payload)
+            if self.match_token(&[TokenType::Colon]) {
+                payload_type = Some(Box::new(self.parse_type()?));
+            }
+
+            let span = name_token.span.to(if let Some(ref p) = payload_type {
+                p.span
+            } else {
+                name_token.span
+            });
+
+            variants.push(AdtVariant {
+                name: name_id,
+                payload_type,
+                span,
+            });
+
+            if !self.match_token(&[TokenType::Comma]) {
+                break;
+            }
+        }
+
+        let end_token = self.expect(TokenType::RBrace)?;
+
+        Ok(TypeNode {
+            id: self.new_id(),
+            span: start_token.span.to(end_token.span),
+            kind: TypeKind::Adt { variants },
+        })
+    }
 }
 
 // ==========================================
@@ -731,6 +773,7 @@ impl<'a> Parser<'a> {
             // Control Flow & Blocks
             TokenType::If => self.parse_if_expr(span),
             TokenType::Switch => self.parse_switch_expr(span),
+            TokenType::Match => self.parse_match_expr(span),
             TokenType::LBrace => self.parse_block_expr(span),
             TokenType::For => self.parse_for_expr(span),
             TokenType::Let | TokenType::Const | TokenType::Static => self.parse_decl_expr(token),
@@ -1308,7 +1351,7 @@ impl<'a> Parser<'a> {
                     },
                 })
             }
-            // ✅ 模式 C: [Scalar] .{ 10 } 或者 Type.{ 1 << 12 }
+            // 模式 C: [Scalar] .{ 10 } 或者 Type.{ 1 << 12 }
             else {
                 // 既没有逗号，也没有分号，那就是唯一的一个单值！直接包装为 Scalar！
                 let rb = self.expect(TokenType::RBrace)?;
@@ -1532,6 +1575,99 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_expression(Precedence::Lowest)
         }
+    }
+
+    fn parse_match_expr(&mut self, start_span: Span) -> ParseResult<Expr> {
+        self.expect(TokenType::LParen)?;
+        let target = self.parse_expression(Precedence::Lowest)?;
+        self.expect(TokenType::RParen)?;
+        self.expect(TokenType::LBrace)?;
+
+        let mut arms = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let arm_start = self.peek().span;
+
+            let pattern = if self.match_token(&[TokenType::Else]) {
+                MatchPattern::CatchAll(arm_start)
+            } else {
+                let mut target_type = None;
+                let variant_name;
+
+                // 语法1: 省略前缀 `.Ok`
+                if self.match_token(&[TokenType::Dot]) {
+                    let v_tok = self.expect(TokenType::Identifier)?;
+                    variant_name = self.intern_token(v_tok);
+                } else {
+                    // 语法2: 带有显式前缀，尝试解析为 Type
+                    let ty = self.parse_type()?;
+                    
+                    if self.match_token(&[TokenType::Dot]) {
+                        // 情况A: 带泛型的类型被截断，比如 `Result[i32, i32] . Ok`
+                        let v_tok = self.expect(TokenType::Identifier)?;
+                        variant_name = self.intern_token(v_tok);
+                        target_type = Some(Box::new(ty));
+                    } else if let TypeKind::Path { mut segments, generics } = ty.kind {
+                        // 情况B: 无泛型，parse_type 会把 `ASTNode.Boolean` 整体当作路径吃掉
+                        if generics.is_empty() && segments.len() >= 2 {
+                            // 把最后一段弹出来当做变体名
+                            variant_name = segments.pop().unwrap(); 
+                            
+                            // 剩下的重新组装回 Target Type
+                            let remain_ty = TypeNode {
+                                id: self.new_id(),
+                                span: ty.span, // TODO: 近似
+                                kind: TypeKind::Path { segments, generics: vec![] },
+                            };
+                            target_type = Some(Box::new(remain_ty));
+                        } else {
+                            self.add_error(ty.span, "Invalid ADT match pattern".into());
+                            return Err(());
+                        }
+                    } else {
+                        self.add_error(ty.span, "Expected variant pattern".into());
+                        return Err(());
+                    }
+                }
+
+                // 判断是否有数据绑定: `: val`
+                let mut binding = None;
+                if self.match_token(&[TokenType::Colon]) {
+                    let bind_token = self.expect(TokenType::Identifier)?;
+                    binding = Some(self.intern_token(bind_token));
+                }
+
+                let pat_span = arm_start.to(self.stream.prev_span());
+                MatchPattern::Variant {
+                    target_type,
+                    variant_name,
+                    binding,
+                    span: pat_span,
+                }
+            };
+
+            self.expect(TokenType::Arrow)?;
+            
+            let body = self.parse_switch_body()?; 
+            self.match_token(&[TokenType::Comma]);
+
+            arms.push(MatchArm {
+                span: arm_start.to(body.span),
+                pattern,
+                body,
+            });
+        }
+
+        let rb = self.expect(TokenType::RBrace)?;
+
+        Ok(Expr {
+            id: self.new_id(),
+            span: start_span.to(rb.span),
+            kind: ExprKind::Match {
+                target: Box::new(target),
+                arms,
+            },
+        })
     }
 
     fn parse_decl_expr(&mut self, start_token: Token) -> ParseResult<Expr> {
