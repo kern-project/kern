@@ -1,6 +1,6 @@
 [package]
 name = "kernc"
-version = "0.2.5"
+version = "0.2.7"
 edition = "2024"
 
 [dependencies]
