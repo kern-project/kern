@@ -127,7 +127,7 @@ impl<'a> ExprChecker<'a> {
                 ret_type,
                 body,
             } => self.check_lambda(params, ret_type, body),
-            
+
             ExprKind::Infer => {
                 self.ctx.struct_error(expr.span, "type placeholder `_` cannot be evaluated as an expression")
                     .with_hint("in Kern, `_` is only used as a discard binding (`let _ =`) or in array length inference (`[_]T`)")
@@ -1726,7 +1726,7 @@ impl<'a> ExprChecker<'a> {
             let is_mut = self.is_mut_type(expected);
             let base_array = self.ctx.type_registry.intern(TypeKind::Array {
                 elem: exp_elem_ty,
-                len: elems.len() as u64, 
+                len: elems.len() as u64,
             });
             if is_mut {
                 self.ctx.type_registry.intern(TypeKind::Mut(base_array))
@@ -1783,9 +1783,7 @@ impl<'a> ExprChecker<'a> {
             let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
             let actual_len = match ce.eval_usize(count) {
                 Ok(val) => val,
-                Err(_) => {
-                    0 
-                }
+                Err(_) => 0,
             };
 
             let is_mut = self.is_mut_type(expected);
