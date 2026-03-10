@@ -435,6 +435,10 @@ impl<'a> Collector<'a> {
         span: crate::utils::Span,
         is_pub: bool,
     ) {
+        // 如果是 `_`，直接忽略，不存入作用域
+        if self.ctx.resolve(name) == "_" {
+            return;
+        }
         let info = SymbolInfo {
             kind,
             node_id,

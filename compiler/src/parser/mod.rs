@@ -810,6 +810,13 @@ impl<'a> Parser<'a> {
             }
 
             TokenType::Fn => self.parse_lambda_expr(span),
+
+            TokenType::Underscore => Ok(Expr {
+                id: self.new_id(),
+                span,
+                kind: ExprKind::Infer,
+            }),
+
             _ => {
                 let text = self.context.source_manager.slice_source(span).to_string();
                 self.add_error(span, format!("Expected expression, found '{}'", text));
@@ -1715,8 +1722,15 @@ impl<'a> Parser<'a> {
     fn parse_decl_expr(&mut self, start_token: Token) -> ParseResult<Expr> {
         let tag = start_token.tag;
 
-        let name = self.expect(TokenType::Identifier)?;
-        let name_id = self.intern_token(name);
+        let name_token = if self.match_token(&[TokenType::Underscore]) {
+            Token {
+                tag: TokenType::Underscore,
+                span: self.stream.prev_span(),
+            }
+        } else {
+            self.expect(TokenType::Identifier)?
+        };
+        let name_id = self.intern_token(name_token);
 
         if self.match_token(&[TokenType::Colon]) {
             let err_span = self.stream.prev_span();

@@ -482,14 +482,18 @@ impl<'a> Lowerer<'a> {
                         } else {
                             if let ExprKind::Let { name, init } = &e.kind {
                                 let init_mast = self.lower_expr(init, subst_map, None);
-                                let var_ty = init_mast.ty; // 绝对信任右侧推导出的类型
-
-                                self.local_types.last_mut().unwrap().insert(*name, var_ty);
-                                stmts.push(MastStmt::Let {
-                                    name: *name,
-                                    ty: var_ty,
-                                    init: init_mast,
-                                });
+                                // 如果是忽略绑定，转换为单纯的 ExprStmt 执行副作用
+                                if self.ctx.resolve(*name) == "_" {
+                                    stmts.push(MastStmt::Expr(init_mast));
+                                } else {
+                                    let var_ty = init_mast.ty;
+                                    self.local_types.last_mut().unwrap().insert(*name, var_ty);
+                                    stmts.push(MastStmt::Let {
+                                        name: *name,
+                                        ty: var_ty,
+                                        init: init_mast,
+                                    });
+                                }
                             } else {
                                 let lowered = self.lower_expr(e, subst_map, None);
                                 if !matches!(e.kind, ExprKind::Static { .. }) {
