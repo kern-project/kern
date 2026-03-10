@@ -216,6 +216,20 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
+impl Expr {
+    /// 判断该表达式在视觉上是否自带块级闭合边界 (即以 `}` 结尾)
+    pub fn is_block_like(&self) -> bool {
+        matches!(
+            self.kind,
+            ExprKind::If { .. }
+                | ExprKind::Match { .. }
+                | ExprKind::Switch { .. }
+                | ExprKind::For { .. }
+                | ExprKind::Block { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     /// `let x = v` (可变性包含在 v 的类型中，例如 let x = mut i32.{10})

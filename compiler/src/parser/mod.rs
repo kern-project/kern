@@ -1418,7 +1418,6 @@ impl<'a> Parser<'a> {
                 let defer_t = self.advance();
                 let expr = self.parse_expression(Precedence::Lowest)?;
                 self.expect(TokenType::Semicolon)?;
-
                 let defer_expr = Expr {
                     id: self.new_id(),
                     span: defer_t.span.to(self.stream.prev_span()),
@@ -1433,24 +1432,17 @@ impl<'a> Parser<'a> {
                 });
                 continue;
             }
-
             let expr = match self.parse_expression(Precedence::Lowest) {
                 Ok(e) => e,
                 Err(_) => {
-                    // 如果块内的表达式解析失败，就在块内部同步，跳到下一个分号
+                    // 如果块内的表达式解析失败，就在块内部同步，跳到下一个分号或右大括号
                     self.synchronize();
                     continue;
                 }
             };
 
-            // 判断当前表达式是否是自带大括号的“块级表达式”
-            let is_block_like = matches!(
-                &expr.kind,
-                ExprKind::If { .. }
-                    | ExprKind::Block { .. }
-                    | ExprKind::Switch { .. }
-                    | ExprKind::For { .. }
-            );
+            // 使用 AST 提供的统一方法判断
+            let is_block_like = expr.is_block_like();
 
             if self.match_token(&[TokenType::Semicolon]) {
                 stmts.push(Stmt {
@@ -1469,6 +1461,7 @@ impl<'a> Parser<'a> {
                     kind: StmtKind::ExprStmt(expr),
                 });
             } else {
+                // 普通表达式必须以分号结尾
                 self.error_at_current("Expected semicolon".to_string());
                 stmts.push(Stmt {
                     id: self.new_id(),
@@ -1477,6 +1470,7 @@ impl<'a> Parser<'a> {
                 });
             }
         }
+
         let rb = self.expect(TokenType::RBrace)?;
         let end_span = rb.span;
         Ok(Expr {
