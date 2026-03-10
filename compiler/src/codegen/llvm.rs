@@ -241,6 +241,31 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         )
     }
 
+    /// 在当前函数的 entry block 首部安全地分配局部变量内存。
+    /// 这样可以避免在循环内部调用 alloca 导致的栈溢出。
+    fn create_entry_block_alloca(
+        &self,
+        llvm_ty: BasicTypeEnum<'ctx>,
+        name: &str,
+    ) -> inkwell::values::PointerValue<'ctx> {
+        let builder = self.context.create_builder();
+
+        // 获取当前正在构建的函数
+        let current_block = self.builder.get_insert_block().unwrap();
+        let current_func = current_block.get_parent().unwrap();
+
+        // 获取该函数的 entry block
+        let entry_block = current_func.get_first_basic_block().unwrap();
+
+        // 将插入点设置在 entry block 的第一条指令之前
+        match entry_block.get_first_instruction() {
+            Some(first_instr) => builder.position_before(&first_instr),
+            None => builder.position_at_end(entry_block),
+        }
+
+        builder.build_alloca(llvm_ty, name).unwrap()
+    }
+
     // ==========================================
     //          Phase 1: Declarations
     // ==========================================
@@ -344,10 +369,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             let param_val = llvm_func.get_nth_param(i as u32).unwrap();
             let param_ty = self.get_llvm_type(param.ty);
 
-            let alloca = self
-                .builder
-                .build_alloca(param_ty, &format!("arg_{}", param.name.0))
-                .unwrap();
+            let alloca = self.create_entry_block_alloca(param_ty, &format!("arg_{}", param.name.0));
             self.builder.build_store(alloca, param_val).unwrap();
             self.locals.insert(param.name, alloca);
         }
@@ -383,10 +405,8 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 MastStmt::Let { name, ty, init } => {
                     let init_val = self.compile_expr(init);
                     let llvm_ty = self.get_llvm_type(*ty);
-                    let alloca = self
-                        .builder
-                        .build_alloca(llvm_ty, &format!("let_{}", name.0))
-                        .unwrap();
+                    let alloca =
+                        self.create_entry_block_alloca(llvm_ty, &format!("let_{}", name.0));
                     self.builder.build_store(alloca, init_val).unwrap();
                     self.locals.insert(*name, alloca);
                 }
@@ -585,10 +605,8 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
     fn compile_union_init(&mut self, union_id: MonoId, value: &MastExpr) -> BasicValueEnum<'ctx> {
         let union_llvm_ty = *self.structs.get(&union_id).unwrap();
-        let alloca = self
-            .builder
-            .build_alloca(union_llvm_ty, "union_init")
-            .unwrap();
+        let alloca =
+            self.create_entry_block_alloca(union_llvm_ty.as_basic_type_enum(), "union_init");
 
         let val = self.compile_expr(value);
         let val_ptr_ty = self.context.ptr_type(AddressSpace::default());
@@ -621,10 +639,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         let union_llvm_ty = struct_llvm_ty.get_field_type_at_index(1).unwrap();
 
         // 1. 组装 Payload Union
-        let union_alloca = self
-            .builder
-            .build_alloca(union_llvm_ty, "adt_union_init")
-            .unwrap();
+        let union_alloca = self.create_entry_block_alloca(union_llvm_ty, "adt_union_init");
 
         if payload.ty != TypeId::VOID && payload.ty != TypeId::ERROR {
             let payload_val = self.compile_expr(payload);
@@ -1084,8 +1099,41 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                         .into(),
                     _ => unreachable!(),
                 }
+            } else if lhs_val.is_float_value() {
+                // 新增：处理浮点数复合赋值
+                let l_float = lhs_val.into_float_value();
+                let r_float = rhs_val.into_float_value();
+                use ast::AssignmentOperator::*;
+                match op {
+                    AddAssign => self
+                        .builder
+                        .build_float_add(l_float, r_float, "fadd_a")
+                        .unwrap()
+                        .into(),
+                    SubtractAssign => self
+                        .builder
+                        .build_float_sub(l_float, r_float, "fsub_a")
+                        .unwrap()
+                        .into(),
+                    MultiplyAssign => self
+                        .builder
+                        .build_float_mul(l_float, r_float, "fmul_a")
+                        .unwrap()
+                        .into(),
+                    DivideAssign => self
+                        .builder
+                        .build_float_div(l_float, r_float, "fdiv_a")
+                        .unwrap()
+                        .into(),
+                    ModuloAssign => self
+                        .builder
+                        .build_float_rem(l_float, r_float, "frem_a")
+                        .unwrap()
+                        .into(),
+                    _ => unreachable!("Unsupported float assignment operator"),
+                }
             } else {
-                unreachable!();
+                unreachable!("Unsupported type for assignment");
             };
             self.builder.build_store(ptr, new_val).unwrap();
         }
