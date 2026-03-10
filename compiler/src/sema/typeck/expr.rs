@@ -306,26 +306,26 @@ impl<'a> ExprChecker<'a> {
         expected_ty: Option<TypeId>,
         span: Span,
     ) -> TypeId {
-        let mut actual_expected = expected_ty;
-        if let Some(ty_ast) = type_node {
+        // 智能决定目标类型
+        let target_ty = if let Some(ty_ast) = type_node {
+            // 情况 A: 显式指定了类型前缀 (如 Result[i32, i32].{ ... })
             let mut resolver = TypeResolver::new(self.ctx);
             let scope = resolver.ctx.scopes.current_scope_id().unwrap();
-            let prefix_ty = resolver.resolve_type(ty_ast, scope);
-            actual_expected = Some(prefix_ty);
-        }
-
-        if let Some(exp_ty) = actual_expected {
-            self.check_data_literal(literal, exp_ty, span)
+            resolver.resolve_type(ty_ast, scope)
+        } else if let Some(exp) = expected_ty {
+            // 情况 B: 省略了前缀，但外层有期望的类型 (如 `(ret_type)` Option[i32] = .{ ... })
+            // 去除 Mut 修饰符，拿到真正的数据类型
+            self.strip_mut(exp)
         } else {
-            if let ast::DataLiteralKind::Scalar(inner) = literal {
-                self.check_expr(inner, None)
-            } else {
-                self.ctx.struct_error(span, "cannot infer type for anonymous initialization `.{...}`")
-                    .with_hint("provide an explicit type context or prepend the type name, e.g., `MyStruct.{...}`")
-                    .emit();
-                TypeId::ERROR
-            }
-        }
+            // 情况 C: 既没写前缀，外层又不知道该是什么类型 (如 let x = .{ 10 })
+            self.ctx.struct_error(span, "cannot infer type for anonymous initialization `.{...}`")
+                .with_hint("provide an explicit type context or prepend the type name, e.g., `MyStruct.{...}`")
+                .emit();
+            return TypeId::ERROR;
+        };
+
+        // 将确定的 target_ty 继续下传给具体的字面量检查器
+        self.check_data_literal(literal, target_ty, span)
     }
 
     fn check_enum_literal(
@@ -524,8 +524,13 @@ impl<'a> ExprChecker<'a> {
         let expected_ret = self.current_return_type.unwrap_or(TypeId::VOID);
 
         if let Some(v) = val {
-            let v_ty = self.check_expr(v, Some(expected_ret));
-            self.check_coercion(v.span, expected_ret, v_ty);
+            // 将当前函数期待的类型 (expected_ret) 传给要 return 的表达式
+            // 如果是 `return .{ Some: 1 }`，这里 expected_ret 就会传进 DataInit 中
+            let val_ty = self.check_expr(v, Some(expected_ret));
+
+            if let Some(ret_ty) = self.current_return_type {
+                self.check_coercion(v.span, ret_ty, val_ty);
+            }
         } else {
             if expected_ret != TypeId::VOID && expected_ret != TypeId::ERROR {
                 let ret_str = self.ctx.ty_to_string(expected_ret);
