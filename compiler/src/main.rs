@@ -10,6 +10,7 @@ fn print_usage(program_name: &str) {
     println!("  -O0, -O1, -O2, -O3  Set optimization level");
     println!("  --emit-llvm    Print LLVM IR to stdout");
     println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
+    println!("  -v, --version  Display version information and exit");
     println!("  -h, --help     Display this help and exit");
 }
 
@@ -24,6 +25,10 @@ fn parse_args() -> CompileOptions {
         match arg.as_str() {
             "-h" | "--help" => {
                 print_usage(&program_name);
+                process::exit(0);
+            }
+            "-v" | "--version" => {
+                println!("kernc version {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "-o" => {
