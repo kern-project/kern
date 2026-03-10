@@ -51,6 +51,9 @@ pub enum TypeKind {
         len: u64, // 数组长度必须是常量
     },
 
+    // 长度待推导的数组 `[_]T`
+    ArrayInfer(TypeId),
+
     /// 切片: []T (胖指针)
     Slice(TypeId),
 
@@ -256,6 +259,7 @@ impl TypeRegistry {
                 Some(*elem)
             }
             TypeKind::Array { elem, .. } => Some(*elem),
+            TypeKind::ArrayInfer(elem) => Some(*elem),
             TypeKind::Mut(inner) => self.get_elem_type(*inner), // 穿透 Mut 找元素
             _ => None,
         }

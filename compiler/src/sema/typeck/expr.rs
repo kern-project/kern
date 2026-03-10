@@ -127,6 +127,13 @@ impl<'a> ExprChecker<'a> {
                 ret_type,
                 body,
             } => self.check_lambda(params, ret_type, body),
+            
+            ExprKind::Infer => {
+                self.ctx.struct_error(expr.span, "type placeholder `_` cannot be evaluated as an expression")
+                    .with_hint("in Kern, `_` is only used as a discard binding (`let _ =`) or in array length inference (`[_]T`)")
+                    .emit();
+                TypeId::ERROR
+            }
         };
 
         self.ctx.node_types.insert(expr.id, ty);
@@ -1677,14 +1684,24 @@ impl<'a> ExprChecker<'a> {
         exp_norm: TypeId,
         span: Span,
     ) -> TypeId {
-        if let TypeKind::Array {
-            elem: exp_elem,
-            len,
-        } = self.ctx.type_registry.get(exp_norm)
-        {
-            let exp_elem_ty = *exp_elem;
+        // 1. 动态剥离类型信息
+        let (exp_elem_ty, expected_len) = match self.ctx.type_registry.get(exp_norm) {
+            TypeKind::Array { elem, len } => (*elem, Some(*len)),
+            TypeKind::ArrayInfer(elem) => (*elem, None), // 这是 [_]T 的情况
+            _ => {
+                // 如果既不是数组，也不是推导数组，报错退出
+                let ty_str = self.ctx.ty_to_string(expected);
+                self.ctx
+                    .struct_error(span, "expected an array type for array literal `.{ ... }`")
+                    .with_hint(format!("context expects `{}`", ty_str))
+                    .emit();
+                return TypeId::ERROR;
+            }
+        };
 
-            if elems.len() as u64 != *len {
+        // 2. 如果是定长数组，校验长度
+        if let Some(len) = expected_len {
+            if elems.len() as u64 != len {
                 self.ctx
                     .struct_error(
                         span,
@@ -1696,19 +1713,29 @@ impl<'a> ExprChecker<'a> {
                     )
                     .emit();
             }
+        }
 
-            for e in elems {
-                let act_ty = self.check_expr(e, Some(exp_elem_ty));
-                self.check_coercion(e.span, exp_elem_ty, act_ty);
+        // 3. 校验所有元素的类型
+        for e in elems {
+            let act_ty = self.check_expr(e, Some(exp_elem_ty));
+            self.check_coercion(e.span, exp_elem_ty, act_ty);
+        }
+
+        // 4. 返回最终确定的类型
+        if expected_len.is_none() {
+            let is_mut = self.is_mut_type(expected);
+            let base_array = self.ctx.type_registry.intern(TypeKind::Array {
+                elem: exp_elem_ty,
+                len: elems.len() as u64, 
+            });
+            if is_mut {
+                self.ctx.type_registry.intern(TypeKind::Mut(base_array))
+            } else {
+                base_array
             }
-            expected
         } else {
-            let ty_str = self.ctx.ty_to_string(expected);
-            self.ctx
-                .struct_error(span, "expected an array type for array literal `.{ ... }`")
-                .with_hint(format!("context expects `{}`", ty_str))
-                .emit();
-            TypeId::ERROR
+            // 原本就是 [N]T
+            expected
         }
     }
 
@@ -1721,29 +1748,58 @@ impl<'a> ExprChecker<'a> {
         exp_norm: TypeId,
         span: Span,
     ) -> TypeId {
-        if let TypeKind::Array { elem: exp_elem, .. } = self.ctx.type_registry.get(exp_norm) {
-            let exp_elem_ty = *exp_elem;
-
-            let val_ty = self.check_expr(value, Some(exp_elem_ty));
-            self.check_coercion(value.span, exp_elem_ty, val_ty);
-
-            let c_ty = self.check_expr(count, Some(TypeId::USIZE));
-            if !self.ctx.type_registry.is_integer(self.strip_mut(c_ty)) {
+        // 1. 动态剥离类型信息
+        let (exp_elem_ty, is_infer) = match self.ctx.type_registry.get(exp_norm) {
+            TypeKind::Array { elem, .. } => (*elem, false),
+            TypeKind::ArrayInfer(elem) => (*elem, true),
+            _ => {
+                let ty_str = self.ctx.ty_to_string(expected);
                 self.ctx
-                    .struct_error(count.span, "repeat count must be an integer")
+                    .struct_error(
+                        span,
+                        "expected an array type for repeat literal `.{ v; N }`",
+                    )
+                    .with_hint(format!("context expects `{}`", ty_str))
                     .emit();
+                return TypeId::ERROR;
             }
-            expected
-        } else {
-            let ty_str = self.ctx.ty_to_string(expected);
+        };
+
+        // 2. 校验重复的元素值
+        let val_ty = self.check_expr(value, Some(exp_elem_ty));
+        self.check_coercion(value.span, exp_elem_ty, val_ty);
+
+        // 3. 校验重复次数
+        let c_ty = self.check_expr(count, Some(TypeId::USIZE));
+        if !self.ctx.type_registry.is_integer(self.strip_mut(c_ty)) {
             self.ctx
-                .struct_error(
-                    span,
-                    "expected an array type for repeat literal `.{ v; N }`",
-                )
-                .with_hint(format!("context expects `{}`", ty_str))
+                .struct_error(count.span, "repeat count must be an integer")
                 .emit();
-            TypeId::ERROR
+        }
+
+        // 4. 返回最终类型
+        if is_infer {
+            // 是 [_]T，利用 ConstEvaluator 求出后面填的真实长度
+            let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
+            let actual_len = match ce.eval_usize(count) {
+                Ok(val) => val,
+                Err(_) => {
+                    0 
+                }
+            };
+
+            let is_mut = self.is_mut_type(expected);
+            let base_array = self.ctx.type_registry.intern(TypeKind::Array {
+                elem: exp_elem_ty,
+                len: actual_len, // 正确的话是真实长度，错误的话是兜底的 0
+            });
+            if is_mut {
+                self.ctx.type_registry.intern(TypeKind::Mut(base_array))
+            } else {
+                base_array
+            }
+        } else {
+            expected
         }
     }
 
@@ -2373,6 +2429,7 @@ impl<'a> ExprChecker<'a> {
             (TypeKind::Array { elem: ge, len: gl }, TypeKind::Array { elem: ce, len: cl }) => {
                 gl == cl && self.unify(ge, ce, map)
             }
+            (TypeKind::ArrayInfer(g), TypeKind::ArrayInfer(c)) => self.unify(g, c, map),
             (TypeKind::Def(g_id, g_args), TypeKind::Def(c_id, c_args)) if g_id == c_id => {
                 if g_args.len() != c_args.len() {
                     return false;

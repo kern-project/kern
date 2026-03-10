@@ -55,6 +55,10 @@ impl<'a> Substituter<'a> {
                     len,
                 })
             }
+            TypeKind::ArrayInfer(elem) => {
+                let new_elem = self.substitute(elem);
+                self.registry.intern(TypeKind::ArrayInfer(new_elem))
+            }
             TypeKind::Function {
                 params,
                 ret,

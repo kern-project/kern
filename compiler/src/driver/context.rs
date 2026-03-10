@@ -207,6 +207,7 @@ impl Context {
             ty::TypeKind::VolatilePtr(elem) => format!("^{}", self.ty_to_string(*elem)),
             ty::TypeKind::Slice(elem) => format!("[]{}", self.ty_to_string(*elem)),
             ty::TypeKind::Array { elem, len } => format!("[{}]{}", len, self.ty_to_string(*elem)),
+            ty::TypeKind::ArrayInfer(elem) => format!("[_]{}", self.ty_to_string(*elem)),
             ty::TypeKind::Mut(inner) => format!("mut {}", self.ty_to_string(*inner)),
 
             // 具名类型：去 defs 里查真名，并拼接泛型

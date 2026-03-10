@@ -337,6 +337,7 @@ pub enum ExprKind {
     },
 
     Undef,
+    Infer,
 
     /// 泛型实例化: target[T, U]
     GenericInstantiation {

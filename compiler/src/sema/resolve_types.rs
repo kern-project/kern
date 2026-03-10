@@ -300,13 +300,19 @@ impl<'a> TypeResolver<'a> {
             }
             ast::TypeKind::Array { elem, len } => {
                 let base = self.resolve_type(elem, env_scope);
-                let mut evaluator = ConstEvaluator::new(self.ctx);
-                let length = evaluator.eval_usize(len);
-
-                self.ctx.type_registry.intern(TypeKind::Array {
-                    elem: base,
-                    len: length,
-                })
+                if let ast::ExprKind::Infer = len.kind {
+                    self.ctx.type_registry.intern(TypeKind::ArrayInfer(base))
+                } else {
+                    let mut evaluator = ConstEvaluator::new(self.ctx);
+                    let length = match evaluator.eval_usize(len) {
+                        Ok(l) => l,
+                        Err(_) => 0, // 错误已经在 evaluator 内部 emit
+                    };
+                    self.ctx.type_registry.intern(TypeKind::Array {
+                        elem: base,
+                        len: length,
+                    })
+                }
             }
             ast::TypeKind::Function {
                 params,
