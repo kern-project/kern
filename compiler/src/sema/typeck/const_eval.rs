@@ -16,7 +16,7 @@ impl<'a> ConstEvaluator<'a> {
     }
 
     /// 计算并返回安全的 usize (例如用于数组长度)
-    pub fn eval_usize(&mut self, expr: &Expr) -> u64 {
+    pub fn eval_usize(&mut self, expr: &Expr) -> Result<u64, ()> {
         match self.eval_math_inner(expr, 0) {
             Ok(val) => {
                 if val < 0 {
@@ -27,12 +27,16 @@ impl<'a> ConstEvaluator<'a> {
                         )
                         .with_hint("array lengths and similar contexts require positive integers")
                         .emit();
-                    0
+                    Err(())
                 } else {
-                    val as u64
+                    Ok(val as u64)
                 }
             }
-            Err(_) => 0, // 错误已在内部抛出
+            Err(_) => {
+                // eval_math 如果不是常量，应该已经报错了
+                // 这里直接向上传递失败信号
+                Err(())
+            }
         }
     }
 
