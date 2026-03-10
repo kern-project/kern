@@ -738,6 +738,20 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_prefix(prefix_token)?;
 
         while precedence < Precedence::from_token(self.peek().tag) {
+            // 防止后缀 `.{` 贪婪吞噬下一行的前缀 `.{`
+            if self.peek().tag == TokenType::DotLBrace {
+                // 只有标识符、路径访问或泛型，才有资格做 `Type.{}` 的左前缀
+                let is_type_prefix = matches!(
+                    left.kind,
+                    ExprKind::Identifier(_)
+                        | ExprKind::FieldAccess { .. }
+                        | ExprKind::GenericInstantiation { .. }
+                );
+                if !is_type_prefix {
+                    break; // 停止粘合,让下一行去作为独立的 `.{ ... }` 解析
+                }
+            }
+
             let op_token = self.advance();
             left = self.parse_infix(left, op_token)?;
         }
