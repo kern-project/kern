@@ -226,6 +226,21 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         }
     }
 
+    /// 判断当前类型是否在物理上是 Void
+    fn is_void_type(&self, ty: TypeId) -> bool {
+        let mut norm = self.type_registry.normalize(ty);
+        loop {
+            match self.type_registry.get(norm) {
+                TypeKind::Mut(inner) => norm = *inner,
+                _ => break,
+            }
+        }
+        matches!(
+            self.type_registry.get(norm),
+            TypeKind::Primitive(PrimitiveType::Void)
+        )
+    }
+
     // ==========================================
     //          Phase 1: Declarations
     // ==========================================
@@ -343,11 +358,12 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
             let current_block = self.builder.get_insert_block().unwrap();
             if current_block.get_terminator().is_none() {
-                // 2. 如果 Block 有返回值，自动帮它生成 ret 指令
-                if let Some(val) = block_res {
-                    self.builder.build_return(Some(&val)).unwrap();
-                } else if func.ret_ty == TypeId::VOID {
+                // 2. 自动生成 ret 指令 (拦截虚假的 Void 返回值)
+                if self.is_void_type(func.ret_ty) {
+                    // 如果函数是 void 签名，无论 block 抛出了什么假数据，统统 ret void
                     self.builder.build_return(None).unwrap();
+                } else if let Some(val) = block_res {
+                    self.builder.build_return(Some(&val)).unwrap();
                 } else {
                     self.builder.build_unreachable().unwrap();
                 }
@@ -1289,7 +1305,12 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     fn compile_return(&mut self, ret_val: Option<&MastExpr>) -> BasicValueEnum<'ctx> {
         if let Some(val) = ret_val {
             let llvm_val = self.compile_expr(val);
-            self.builder.build_return(Some(&llvm_val)).unwrap();
+            // 如果是 void 表达式，忽略它产生的值，强行 build_return(None)
+            if self.is_void_type(val.ty) {
+                self.builder.build_return(None).unwrap();
+            } else {
+                self.builder.build_return(Some(&llvm_val)).unwrap();
+            }
         } else {
             self.builder.build_return(None).unwrap();
         }
