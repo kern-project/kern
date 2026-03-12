@@ -969,14 +969,31 @@ impl<'a> Parser<'a> {
                 })
             }
             TokenType::CharLiteral => {
-                let raw = self.context.source_manager.slice_source(span);
+                let raw = self.context.source_manager.slice_source(span).to_string();
                 let inner = &raw[1..raw.len() - 1];
+                
                 let c = if inner.is_empty() {
                     self.add_error(span, "Empty character literal".to_string());
-                    '\0' // Dummy value for recovery
+                    '\0' // 兜底恢复
                 } else {
-                    inner.chars().next().unwrap()
+                    match self.unescape_string(inner, span) {
+                        Ok(unescaped) => {
+                            let mut chars = unescaped.chars();
+                            if let Some(ch) = chars.next() {
+                                // 确切检查转义后是否只包含一个字符 (防止出现 '\n\n')
+                                if chars.next().is_some() {
+                                    self.add_error(span, "Character literal may only contain one character".to_string());
+                                }
+                                ch
+                            } else {
+                                self.add_error(span, "Empty character literal after unescaping".to_string());
+                                '\0'
+                            }
+                        }
+                        Err(()) => '\0', // 错误已经在 unescape_string 中报告过了
+                    }
                 };
+                
                 Ok(Expr {
                     id: self.new_id(),
                     span,
