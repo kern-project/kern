@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "kernc"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "inkwell",
  "target-lexicon",
