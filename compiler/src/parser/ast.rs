@@ -611,9 +611,9 @@ pub enum AttributeKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetaItem {
     /// 仅标记，如 `cold`, `packed`
-    Marker(SymbolId), 
-    
+    Marker(SymbolId),
+
     /// 传参标记，如 `export_name("foo")`, `align(4)`
     /// 这里统一把括号内的东西当作 Expr 处理，Sema 阶段再校验它是不是字符串或整数
-    Call(SymbolId, Box<Expr>), 
+    Call(SymbolId, Box<Expr>),
 }

@@ -33,7 +33,7 @@ impl<'a> Pruner<'a> {
     fn prune_decl(&mut self, decl: &mut Decl) -> bool {
         // 1. 评估当前声明的生存条件
         if !self.eval_attributes(&decl.attributes) {
-            return false; 
+            return false;
         }
 
         // 2. 如果保留下来了，且它是包含子项的块（Impl 或 Extern），递归剪枝内部项
@@ -85,7 +85,7 @@ impl<'a> Pruner<'a> {
                     Err(_) => {
                         // 求值失败（比如遇到了未知的变量或类型不匹配），已经报过错了
                         // 为了防止产生更多级联错误，我们将其视为 false 剪掉
-                        return false; 
+                        return false;
                     }
                 }
             }
@@ -114,7 +114,9 @@ impl<'a> ConditionEvaluator<'a> {
         match val {
             CondValue::Bool(b) => Ok(b),
             _ => {
-                self.ctx.struct_error(expr.span, "condition must evaluate to a boolean value").emit();
+                self.ctx
+                    .struct_error(expr.span, "condition must evaluate to a boolean value")
+                    .emit();
                 Err(())
             }
         }
@@ -124,11 +126,11 @@ impl<'a> ConditionEvaluator<'a> {
         match &expr.kind {
             ExprKind::Bool(b) => Ok(CondValue::Bool(*b)),
             ExprKind::String(s) => Ok(CondValue::String(s.clone())),
-            
+
             // 核心：将标识符解析为环境变量
             ExprKind::Identifier(sym) => {
                 let name = self.ctx.resolve(*sym);
-                
+
                 // 1. 尝试匹配内置平台变量
                 if name == "os" {
                     // TargetMachine Triple 中的 OS 字段
@@ -142,8 +144,12 @@ impl<'a> ConditionEvaluator<'a> {
 
                 // 2. 尝试从 CLI 传入的 -D 变量中读取
                 if let Some(val) = self.ctx.custom_defines.get(name) {
-                    if val == "true" { return Ok(CondValue::Bool(true)); }
-                    if val == "false" { return Ok(CondValue::Bool(false)); }
+                    if val == "true" {
+                        return Ok(CondValue::Bool(true));
+                    }
+                    if val == "false" {
+                        return Ok(CondValue::Bool(false));
+                    }
                     return Ok(CondValue::String(val.clone()));
                 }
 
@@ -154,12 +160,17 @@ impl<'a> ConditionEvaluator<'a> {
                 Err(())
             }
 
-            ExprKind::Unary { op: UnaryOperator::LogicalNot, operand } => {
+            ExprKind::Unary {
+                op: UnaryOperator::LogicalNot,
+                operand,
+            } => {
                 let val = self.eval_inner(operand)?;
                 if let CondValue::Bool(b) = val {
                     Ok(CondValue::Bool(!b))
                 } else {
-                    self.ctx.struct_error(operand.span, "cannot apply `!` to a non-boolean value").emit();
+                    self.ctx
+                        .struct_error(operand.span, "cannot apply `!` to a non-boolean value")
+                        .emit();
                     Err(())
                 }
             }
@@ -168,11 +179,15 @@ impl<'a> ConditionEvaluator<'a> {
                 let left = self.eval_inner(lhs)?;
                 // 为了支持短路求值，如果是 And/Or，我们先不求右边
                 if *op == BinaryOperator::LogicalAnd {
-                    if let CondValue::Bool(false) = left { return Ok(CondValue::Bool(false)); }
+                    if let CondValue::Bool(false) = left {
+                        return Ok(CondValue::Bool(false));
+                    }
                     return self.eval_inner(rhs); // 左边是 true，结果取决于右边
                 }
                 if *op == BinaryOperator::LogicalOr {
-                    if let CondValue::Bool(true) = left { return Ok(CondValue::Bool(true)); }
+                    if let CondValue::Bool(true) = left {
+                        return Ok(CondValue::Bool(true));
+                    }
                     return self.eval_inner(rhs); // 左边是 false，结果取决于右边
                 }
 
@@ -182,7 +197,12 @@ impl<'a> ConditionEvaluator<'a> {
                     BinaryOperator::Equal => Ok(CondValue::Bool(left == right)),
                     BinaryOperator::NotEqual => Ok(CondValue::Bool(left != right)),
                     _ => {
-                        self.ctx.struct_error(expr.span, "unsupported operator in compilation condition").emit();
+                        self.ctx
+                            .struct_error(
+                                expr.span,
+                                "unsupported operator in compilation condition",
+                            )
+                            .emit();
                         Err(())
                     }
                 }

@@ -1097,7 +1097,11 @@ impl<'a> Lowerer<'a> {
         _span: Span,
     ) -> MastExprKind {
         let config_arg = &args[0];
-        let fields = if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(f), .. } = &config_arg.kind {
+        let fields = if let ExprKind::DataInit {
+            literal: ast::DataLiteralKind::Struct(f),
+            ..
+        } = &config_arg.kind
+        {
             f
         } else {
             unreachable!()
@@ -1118,7 +1122,10 @@ impl<'a> Lowerer<'a> {
                         // 支持单字符串 asm: "nop"
                         ExprKind::String(s) => asm_template = s.clone(),
                         // 支持数组形式 asm: .{ "out dx, al", "in al, dx" }
-                        ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } => {
+                        ExprKind::DataInit {
+                            literal: ast::DataLiteralKind::Array(elems),
+                            ..
+                        } => {
                             let mut lines = Vec::new();
                             for e in elems {
                                 if let ExprKind::String(s) = &e.kind {
@@ -1136,14 +1143,22 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 "outputs" => {
-                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                    if let ExprKind::DataInit {
+                        literal: ast::DataLiteralKind::Struct(regs),
+                        ..
+                    } = &field.value.kind
+                    {
                         for reg in regs {
                             let reg_name = self.ctx.resolve(reg.name);
                             // LLVM 约束：reg -> "=r", freg -> "=f", eax -> "={eax}"
-                            let constraint = if reg_name == "reg" { "=r".to_string() } 
-                                             else if reg_name == "freg" { "=f".to_string() } 
-                                             else { format!("={{{}}}", reg_name) };
-                            
+                            let constraint = if reg_name == "reg" {
+                                "=r".to_string()
+                            } else if reg_name == "freg" {
+                                "=f".to_string()
+                            } else {
+                                format!("={{{}}}", reg_name)
+                            };
+
                             let ptr_expr = self.lower_expr(&reg.value, subst_map, None);
                             let val_ty = self.ctx.type_registry.get_elem_type(ptr_expr.ty).unwrap();
                             outputs.push((constraint, ptr_expr, val_ty));
@@ -1151,21 +1166,33 @@ impl<'a> Lowerer<'a> {
                     }
                 }
                 "inputs" => {
-                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                    if let ExprKind::DataInit {
+                        literal: ast::DataLiteralKind::Struct(regs),
+                        ..
+                    } = &field.value.kind
+                    {
                         for reg in regs {
                             let reg_name = self.ctx.resolve(reg.name);
                             // LLVM 约束：reg -> "r", freg -> "f", eax -> "{eax}"
-                            let constraint = if reg_name == "reg" { "r".to_string() } 
-                                             else if reg_name == "freg" { "f".to_string() } 
-                                             else { format!("{{{}}}", reg_name) };
-                            
+                            let constraint = if reg_name == "reg" {
+                                "r".to_string()
+                            } else if reg_name == "freg" {
+                                "f".to_string()
+                            } else {
+                                format!("{{{}}}", reg_name)
+                            };
+
                             let val_expr = self.lower_expr(&reg.value, subst_map, None);
                             inputs.push((constraint, val_expr));
                         }
                     }
                 }
                 "clobbers" => {
-                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } = &field.value.kind {
+                    if let ExprKind::DataInit {
+                        literal: ast::DataLiteralKind::Array(elems),
+                        ..
+                    } = &field.value.kind
+                    {
                         for e in elems {
                             if let ExprKind::String(s) = &e.kind {
                                 clobbers.push(format!("~{{{}}}", s));
@@ -1186,7 +1213,7 @@ impl<'a> Lowerer<'a> {
             output_ptrs.push(ptr);
             output_tys.push(ty);
         }
-        
+
         let mut input_args = Vec::new();
         for (c, expr) in inputs {
             all_constraints.push(c);
@@ -1542,17 +1569,30 @@ impl<'a> Lowerer<'a> {
             };
 
             let init_f = &fields[0];
-            let tag_val = def.variants.iter().position(|v| v.name == init_f.name).unwrap() as u128;
+            let tag_val = def
+                .variants
+                .iter()
+                .position(|v| v.name == init_f.name)
+                .unwrap() as u128;
 
             let mut variant_subst_map = HashMap::new();
             for (i, param) in def.generics.iter().enumerate() {
                 variant_subst_map.insert(param.name, gen_args[i]);
             }
-            
-            let raw_payload_ty = self.ctx.node_types
-                .get(&def.variants[tag_val as usize].payload_type.as_ref().unwrap().id)
-                .copied().unwrap();
-                
+
+            let raw_payload_ty = self
+                .ctx
+                .node_types
+                .get(
+                    &def.variants[tag_val as usize]
+                        .payload_type
+                        .as_ref()
+                        .unwrap()
+                        .id,
+                )
+                .copied()
+                .unwrap();
+
             let conc_payload_ty = Substituter::new(&mut self.ctx.type_registry, &variant_subst_map)
                 .substitute(raw_payload_ty);
 
@@ -1584,16 +1624,34 @@ impl<'a> Lowerer<'a> {
 
                 let mut ordered_fields = Vec::new();
                 for f_def in &s.fields {
-                    let raw_f_ty = self.ctx.node_types.get(&f_def.type_node.id).copied().unwrap_or(TypeId::ERROR);
-                    let conc_f_ty = Substituter::new(&mut self.ctx.type_registry, &struct_subst_map).substitute(raw_f_ty);
+                    let raw_f_ty = self
+                        .ctx
+                        .node_types
+                        .get(&f_def.type_node.id)
+                        .copied()
+                        .unwrap_or(TypeId::ERROR);
+                    let conc_f_ty =
+                        Substituter::new(&mut self.ctx.type_registry, &struct_subst_map)
+                            .substitute(raw_f_ty);
 
                     if let Some(init_f) = fields.iter().find(|f| f.name == f_def.name) {
-                        ordered_fields.push(self.lower_expr(&init_f.value, subst_map, Some(conc_f_ty)));
+                        ordered_fields.push(self.lower_expr(
+                            &init_f.value,
+                            subst_map,
+                            Some(conc_f_ty),
+                        ));
                     } else {
-                        ordered_fields.push(self.lower_expr(f_def.default_value.as_ref().unwrap(), subst_map, Some(conc_f_ty)));
+                        ordered_fields.push(self.lower_expr(
+                            f_def.default_value.as_ref().unwrap(),
+                            subst_map,
+                            Some(conc_f_ty),
+                        ));
                     }
                 }
-                MastExprKind::StructInit { struct_id: mono_id, fields: ordered_fields }
+                MastExprKind::StructInit {
+                    struct_id: mono_id,
+                    fields: ordered_fields,
+                }
             }
             Def::Union(u) => {
                 let mut union_subst_map = HashMap::new();
@@ -1602,11 +1660,21 @@ impl<'a> Lowerer<'a> {
                 }
                 let init_f = &fields[0];
                 let field_idx = u.fields.iter().position(|f| f.name == init_f.name).unwrap();
-                let raw_f_ty = self.ctx.node_types.get(&u.fields[field_idx].type_node.id).copied().unwrap_or(TypeId::ERROR);
-                let conc_f_ty = Substituter::new(&mut self.ctx.type_registry, &union_subst_map).substitute(raw_f_ty);
+                let raw_f_ty = self
+                    .ctx
+                    .node_types
+                    .get(&u.fields[field_idx].type_node.id)
+                    .copied()
+                    .unwrap_or(TypeId::ERROR);
+                let conc_f_ty = Substituter::new(&mut self.ctx.type_registry, &union_subst_map)
+                    .substitute(raw_f_ty);
 
                 let val_expr = self.lower_expr(&init_f.value, subst_map, Some(conc_f_ty));
-                MastExprKind::UnionInit { union_id: mono_id, field_idx, value: Box::new(val_expr) }
+                MastExprKind::UnionInit {
+                    union_id: mono_id,
+                    field_idx,
+                    value: Box::new(val_expr),
+                }
             }
             _ => unreachable!(),
         }
@@ -1664,32 +1732,41 @@ impl<'a> Lowerer<'a> {
             } else {
                 unreachable!()
             };
-            
+
             let variant_name = if let ExprKind::Identifier(id) = &inner.kind {
                 *id
             } else {
                 unreachable!()
             };
 
-            let tag_val = def.variants.iter().position(|v| v.name == variant_name).unwrap() as u128;
+            let tag_val = def
+                .variants
+                .iter()
+                .position(|v| v.name == variant_name)
+                .unwrap() as u128;
 
             return MastExprKind::AdtInit {
                 adt_struct_id: mono_id,
                 tag_value: tag_val,
-                payload: Box::new(MastExpr::new(
-                    TypeId::VOID,
-                    MastExprKind::Undef,
-                    inner.span,
-                )),
+                payload: Box::new(MastExpr::new(TypeId::VOID, MastExprKind::Undef, inner.span)),
             };
-        } 
+        }
         // 2. Trait Object 组装: `Reader.{ ptr }`
         else if let TypeKind::TraitObject(..) = norm {
             let l = self.lower_expr(inner, subst_map, None);
             let vtable_id = self.get_or_create_vtable(l.ty, concrete_ty);
-            
-            let global_array_ty = self.module.globals.iter().find(|g| g.id == vtable_id).unwrap().ty;
-            let array_ptr_ty = self.ctx.type_registry.intern(TypeKind::Pointer(global_array_ty));
+
+            let global_array_ty = self
+                .module
+                .globals
+                .iter()
+                .find(|g| g.id == vtable_id)
+                .unwrap()
+                .ty;
+            let array_ptr_ty = self
+                .ctx
+                .type_registry
+                .intern(TypeKind::Pointer(global_array_ty));
 
             return MastExprKind::ConstructFatPointer {
                 data_ptr: Box::new(l),
@@ -1710,7 +1787,7 @@ impl<'a> Lowerer<'a> {
                     span,
                 )),
             };
-        } 
+        }
         // 3. 基础标量兜底
         else {
             self.lower_expr(inner, subst_map, Some(concrete_ty)).kind
@@ -1756,10 +1833,15 @@ impl<'a> Lowerer<'a> {
         subst_map: &HashMap<SymbolId, TypeId>,
         span: Span,
     ) -> MastExpr {
-        let target_ty = self.ctx.node_types.get(&target.id).copied().unwrap_or(concrete_ty);
+        let target_ty = self
+            .ctx
+            .node_types
+            .get(&target.id)
+            .copied()
+            .unwrap_or(concrete_ty);
         let l = self.lower_expr(lhs, subst_map, None);
         let cast_kind = self.determine_cast_kind(l.ty, target_ty);
-        
+
         MastExpr::new(
             target_ty,
             MastExprKind::Cast {
@@ -1813,7 +1895,7 @@ impl<'a> Lowerer<'a> {
 
         // 仅仅降级循环体，不包含 post
         loop_stmts.push(MastStmt::Expr(self.lower_expr(body, subst_map, None)));
-        
+
         let body_block = MastBlock {
             stmts: loop_stmts,
             result: None,
@@ -2372,13 +2454,17 @@ impl<'a> Lowerer<'a> {
                             let (i_target_base, _) = self.resolve_vtable_source_base(i_target_ty);
 
                             // 1. 如果两者都是聚合类型 (Struct/Union/Enum)，比对 DefId (忽略具体泛型参数)
-                            if let (Some(target_id), Some(src_id)) = (get_base_def_id(i_target_base), src_base_id) {
+                            if let (Some(target_id), Some(src_id)) =
+                                (get_base_def_id(i_target_base), src_base_id)
+                            {
                                 if target_id == src_id {
                                     return Some(impl_def.clone());
                                 }
                             }
                             // 2. 兜底比对：支持标量类型匹配 (例如 impl Trait for i32)
-                            else if self.ctx.type_registry.normalize(i_target_base) == norm_src_base {
+                            else if self.ctx.type_registry.normalize(i_target_base)
+                                == norm_src_base
+                            {
                                 return Some(impl_def.clone());
                             }
                         }

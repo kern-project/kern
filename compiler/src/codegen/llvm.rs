@@ -475,20 +475,18 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     | MastExprKind::GlobalRef(_)
                     | MastExprKind::FieldAccess { .. }
                     | MastExprKind::IndexAccess { .. }
-                    | MastExprKind::Deref(_) => {
-                        self.compile_lvalue(operand).into()
-                    }
+                    | MastExprKind::Deref(_) => self.compile_lvalue(operand).into(),
                     // 如果是右值取地址（如 i32.{ 404 }.&），立即将其实体化到栈上
                     _ => {
                         let rval = self.compile_expr(operand);
                         let llvm_ty = self.get_llvm_type(operand.ty);
-                        
+
                         // 在当前函数的 entry block 开辟一个隐式的临时变量
                         let temp_ptr = self.create_entry_block_alloca(llvm_ty, "tmp_addrof");
-                        
+
                         // 将右值存入内存
                         self.builder.build_store(temp_ptr, rval).unwrap();
-                        
+
                         // 返回这个临时变量的地址
                         temp_ptr.into()
                     }
@@ -870,7 +868,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         // 1. 准备传入给汇编块的参数类型和对应的值
         let mut param_types = Vec::new();
         let mut arg_values = Vec::new();
-        
+
         for arg_expr in &asm_block.input_args {
             let llvm_val = self.compile_expr(arg_expr);
             arg_values.push(llvm_val.into());
@@ -913,20 +911,18 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             asm_block.asm_template.clone(),
             asm_block.constraints.clone(),
             has_side_effects,
-            false, 
-            Some(self.asm_dialect), 
-            false, 
+            false,
+            Some(self.asm_dialect),
+            false,
         );
 
         // 5. 调用汇编指令
-        let call_site = self.builder.build_indirect_call(
-            asm_fn_type,
-            inline_asm,
-            &arg_values,
-            "asm_call",
-        ).unwrap();
+        let call_site = self
+            .builder
+            .build_indirect_call(asm_fn_type, inline_asm, &arg_values, "asm_call")
+            .unwrap();
 
-        // 6. 将 LLVM 返回的值提取并 Store 到用户的指针中 
+        // 6. 将 LLVM 返回的值提取并 Store 到用户的指针中
         if asm_block.output_tys.len() > 0 {
             let asm_result = call_site.try_as_basic_value().unwrap_basic();
 
@@ -934,13 +930,15 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 let target_ptr = self.compile_expr(ptr_expr).into_pointer_value();
 
                 let extracted_val = if asm_block.output_tys.len() == 1 {
-                    asm_result 
+                    asm_result
                 } else {
-                    self.builder.build_extract_value(
-                        asm_result.into_struct_value(),
-                        i as u32,
-                        &format!("asm_out_{}", i),
-                    ).unwrap()
+                    self.builder
+                        .build_extract_value(
+                            asm_result.into_struct_value(),
+                            i as u32,
+                            &format!("asm_out_{}", i),
+                        )
+                        .unwrap()
                 };
 
                 self.builder.build_store(target_ptr, extracted_val).unwrap();
@@ -1322,7 +1320,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         }
     }
 
-    fn compile_loop(&mut self, body: &MastBlock, latch: Option<&MastBlock>) -> BasicValueEnum<'ctx> {
+    fn compile_loop(
+        &mut self,
+        body: &MastBlock,
+        latch: Option<&MastBlock>,
+    ) -> BasicValueEnum<'ctx> {
         let parent_func = self
             .builder
             .get_insert_block()
@@ -1598,14 +1600,13 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     | MastExprKind::GlobalRef(_)
                     | MastExprKind::FieldAccess { .. }
                     | MastExprKind::IndexAccess { .. }
-                    | MastExprKind::Deref(_) => {
-                        self.compile_lvalue(operand)
-                    }
+                    | MastExprKind::Deref(_) => self.compile_lvalue(operand),
                     // 如果是右值（比如 ArrayInit 临时数组），在栈上开辟临时空间存进去
                     _ => {
                         let array_val = self.compile_expr(operand);
                         let array_llvm_ty = self.get_llvm_type(operand.ty);
-                        let temp_ptr = self.create_entry_block_alloca(array_llvm_ty, "tmp_array_for_slice");
+                        let temp_ptr =
+                            self.create_entry_block_alloca(array_llvm_ty, "tmp_array_for_slice");
                         self.builder.build_store(temp_ptr, array_val).unwrap();
                         temp_ptr
                     }

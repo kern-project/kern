@@ -53,13 +53,6 @@ impl<'a> TypeckDriver<'a> {
 
     fn check_function(&mut self, f: &FunctionDef, parent_scope: ScopeId) {
         // 1. 验证 Extern 规则
-        if f.is_extern && f.body.is_some() {
-            self.ctx
-                .struct_error(f.span, "extern functions cannot have a body")
-                .with_hint("extern functions are defined in other object files")
-                .emit();
-            return;
-        }
         if !f.is_extern && f.body.is_none() {
             self.ctx
                 .emit_error(f.span, "Non-extern functions must have a body");

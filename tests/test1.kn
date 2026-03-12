@@ -1,0 +1,19 @@
+#![if(os == "linux" or os == "macos")]
+
+#[cold, export_name("_start")]
+pub extern fn _start() void {
+    let port = u16.{0x3F8};
+    let data = u8.{0x41};
+    let status = mut u8.{undef};
+
+    @asm(.{
+        asm: .{
+            "out dx, al",
+            "in al, dx"
+        },
+        outputs: .{ al: status.& }, 
+        inputs: .{ dx: port, al: data },
+        clobbers: .{ "memory", },
+        volatile: true
+    });
+}

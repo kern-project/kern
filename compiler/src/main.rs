@@ -1,5 +1,5 @@
 use kernc::driver::CompilerDriver;
-use kernc::driver::config::{CompileOptions, OptLevel, TargetMachine, AsmDialect};
+use kernc::driver::config::{AsmDialect, CompileOptions, OptLevel, TargetMachine};
 use std::env;
 use std::process;
 
@@ -10,7 +10,7 @@ fn print_usage(program_name: &str) {
     println!("  -O0, -O1, -O2, -O3  Set optimization level");
     println!("  --emit-llvm    Print LLVM IR to stdout");
     println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
-    println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)"); 
+    println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)");
     println!("  -v, --version  Display version information and exit");
     println!("  -h, --help     Display this help and exit");
 }
@@ -62,7 +62,10 @@ fn parse_args() -> CompileOptions {
                     "intel" => AsmDialect::Intel,
                     "att" => AsmDialect::Att,
                     _ => {
-                        eprintln!("Error: Invalid asm dialect `{}`. Expected `intel` or `att`.", dialect_str);
+                        eprintln!(
+                            "Error: Invalid asm dialect `{}`. Expected `intel` or `att`.",
+                            dialect_str
+                        );
                         process::exit(1);
                     }
                 };

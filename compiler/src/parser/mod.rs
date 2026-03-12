@@ -983,7 +983,7 @@ impl<'a> Parser<'a> {
             TokenType::CharLiteral => {
                 let raw = self.context.source_manager.slice_source(span).to_string();
                 let inner = &raw[1..raw.len() - 1];
-                
+
                 let c = if inner.is_empty() {
                     self.add_error(span, "Empty character literal".to_string());
                     '\0' // 兜底恢复
@@ -994,18 +994,25 @@ impl<'a> Parser<'a> {
                             if let Some(ch) = chars.next() {
                                 // 确切检查转义后是否只包含一个字符 (防止出现 '\n\n')
                                 if chars.next().is_some() {
-                                    self.add_error(span, "Character literal may only contain one character".to_string());
+                                    self.add_error(
+                                        span,
+                                        "Character literal may only contain one character"
+                                            .to_string(),
+                                    );
                                 }
                                 ch
                             } else {
-                                self.add_error(span, "Empty character literal after unescaping".to_string());
+                                self.add_error(
+                                    span,
+                                    "Empty character literal after unescaping".to_string(),
+                                );
                                 '\0'
                             }
                         }
                         Err(()) => '\0', // 错误已经在 unescape_string 中报告过了
                     }
                 };
-                
+
                 Ok(Expr {
                     id: self.new_id(),
                     span,
@@ -1886,7 +1893,7 @@ impl<'a> Parser<'a> {
 
     // Top Level
     pub fn parse_module(&mut self) -> ParseResult<Module> {
-        // 先解析文件最顶部的 #![...] 
+        // 先解析文件最顶部的 #![...]
         let attributes = self.parse_attributes(true).unwrap_or_default();
 
         let mut decls = Vec::new();
@@ -1901,18 +1908,21 @@ impl<'a> Parser<'a> {
         }
         Ok(Module {
             path: "test.kn".to_string(),
-            attributes, 
+            attributes,
             decls,
         })
     }
 
     fn parse_decl(&mut self) -> ParseResult<Option<Decl>> {
-        // 拦截 attributes 
+        // 拦截 attributes
         let attributes = self.parse_attributes(false).unwrap_or_default();
 
         if self.check(TokenType::Eof) {
             if !attributes.is_empty() {
-                self.add_error(attributes[0].span, "Attributes cannot be placed at the end of the file".to_string());
+                self.add_error(
+                    attributes[0].span,
+                    "Attributes cannot be placed at the end of the file".to_string(),
+                );
             }
             return Ok(None);
         }
@@ -1968,7 +1978,7 @@ impl<'a> Parser<'a> {
             Ok(Some(mut decl)) => {
                 decl.attributes = attributes;
                 Ok(Some(decl))
-            },
+            }
             other => other,
         }
     }
@@ -2367,10 +2377,10 @@ impl<'a> Parser<'a> {
     /// 解析连续的属性块
     fn parse_attributes(&mut self, expect_module_level: bool) -> ParseResult<Vec<Attribute>> {
         let mut attrs = Vec::new();
-        
+
         while self.is_at_attribute() {
             let is_bang = self.stream.peek_nth(1).tag == TokenType::Bang;
-            
+
             // 如果期望解析模块级 #![...]，但遇到了 #[...]，立刻跳出循环，留给下一级去吃
             // 或者期望解析 #[...]，但遇到了 #![...]，也跳出
             if is_bang != expect_module_level {
@@ -2378,7 +2388,7 @@ impl<'a> Parser<'a> {
             }
 
             let hash_span = self.advance().span; // 消费 `#`
-            
+
             let mut is_module_level = false;
             if self.match_token(&[TokenType::Bang]) {
                 is_module_level = true;
@@ -2391,11 +2401,11 @@ impl<'a> Parser<'a> {
                 self.expect(TokenType::LParen)?;
                 let expr = self.parse_expression(Precedence::Lowest)?;
                 self.expect(TokenType::RParen)?;
-                
+
                 if self.match_token(&[TokenType::Comma]) {
                     self.add_error(self.stream.prev_span(), "`#[if(...)]` must be standalone and cannot be mixed with metadata in the same bracket".to_string());
                 }
-                
+
                 AttributeKind::If(Box::new(expr))
             } else {
                 // 模式 2: 元数据 #[cold, export_name("foo")]

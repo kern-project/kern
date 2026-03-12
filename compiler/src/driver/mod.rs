@@ -155,9 +155,9 @@ impl CompilerDriver {
 
         // 2. 调用 cc 进行链接
         println!("Linking...");
-        let status = std::process::Command::new("cc") 
-            .arg("-nostdlib")     // 告诉链接器不要引入 C 运行时 (crt1.o)
-            .arg("-no-pie")       // 禁用位置无关可执行文件
+        let status = std::process::Command::new("cc")
+            .arg("-nostdlib") // 告诉链接器不要引入 C 运行时 (crt1.o)
+            .arg("-no-pie") // 禁用位置无关可执行文件
             .arg(&obj_path_str)
             .arg("-o")
             .arg(&self.options.output_file)

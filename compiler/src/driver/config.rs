@@ -1,7 +1,7 @@
 // src/config.rs
+use std::collections::HashMap;
 use std::str::FromStr;
 use target_lexicon::{PointerWidth, Triple};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptLevel {

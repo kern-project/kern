@@ -1,6 +1,6 @@
 #![allow(unused)]
-use super::config::TargetMachine;
 use super::CompileOptions;
+use super::config::TargetMachine;
 use super::diagnostic::{Diagnostic, DiagnosticLevel};
 use crate::parser::ast::NodeId;
 use crate::sema::*;

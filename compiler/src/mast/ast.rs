@@ -66,20 +66,20 @@ pub struct MastParam {
 pub struct MastAsmBlock {
     /// 经过合并的汇编模板字符串，例如 "out dx, al \n in al, dx"
     pub asm_template: String,
-    
+
     /// LLVM 标准约束字符串，例如 "={al},{dx},{al},~{memory}"
     pub constraints: String,
-    
+
     /// 传给内联汇编的实参 (仅包含 inputs)
     pub input_args: Vec<MastExpr>,
-    
+
     /// 接收返回值的指针 (对应 outputs)
     /// Codegen 阶段会自动将汇编返回的结果 Store 到这些指针里
     pub output_ptrs: Vec<MastExpr>,
-    
+
     /// 输出变量的基础类型 (用于 Codegen 生成正确的接收和提取指令)
     pub output_tys: Vec<TypeId>,
-    
+
     pub is_volatile: bool,
 }
 

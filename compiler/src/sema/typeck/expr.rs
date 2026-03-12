@@ -1616,7 +1616,11 @@ impl<'a> ExprChecker<'a> {
             if let ast::DataLiteralKind::Scalar(inner) = kind {
                 return self.check_trait_object_init(inner, expected, exp_norm, span);
             } else {
-                self.ctx.struct_error(span, "trait objects must be initialized with a single pointer")
+                self.ctx
+                    .struct_error(
+                        span,
+                        "trait objects must be initialized with a single pointer",
+                    )
                     .with_hint("example: `Reader.{ file_ptr }`")
                     .emit();
                 return TypeId::ERROR;
@@ -1658,16 +1662,19 @@ impl<'a> ExprChecker<'a> {
         exp_norm: TypeId,
         span: Span,
     ) -> TypeId {
-       // 1. 动态剥离类型信息
+        // 1. 动态剥离类型信息
         let (exp_elem_ty, expected_len) = match self.ctx.type_registry.get(exp_norm) {
             TypeKind::Array { elem, len } => (*elem, Some(*len)),
             TypeKind::ArrayInfer(elem) => (*elem, None),
-            TypeKind::Slice(elem) => (*elem, None), 
+            TypeKind::Slice(elem) => (*elem, None),
             _ => {
                 // 报错信息也可以顺便优化一下
                 let ty_str = self.ctx.ty_to_string(expected);
                 self.ctx
-                    .struct_error(span, "expected an array or slice type for literal `.{ ... }`")
+                    .struct_error(
+                        span,
+                        "expected an array or slice type for literal `.{ ... }`",
+                    )
                     .with_hint(format!("context expects `{}`", ty_str))
                     .emit();
                 return TypeId::ERROR;
@@ -1727,7 +1734,7 @@ impl<'a> ExprChecker<'a> {
         let (exp_elem_ty, is_infer) = match self.ctx.type_registry.get(exp_norm) {
             TypeKind::Array { elem, .. } => (*elem, false),
             TypeKind::ArrayInfer(elem) => (*elem, true),
-            TypeKind::Slice(elem) => (*elem, true), 
+            TypeKind::Slice(elem) => (*elem, true),
             _ => {
                 let ty_str = self.ctx.ty_to_string(expected);
                 self.ctx
@@ -2067,7 +2074,11 @@ impl<'a> ExprChecker<'a> {
         let is_inner_mut_ptr = self.is_mutable_pointer(inner_ty);
 
         if is_to_mut && !is_inner_mut_ptr {
-            self.ctx.struct_error(span, "cannot construct a mutable trait object `mut Trait` from a read-only pointer")
+            self.ctx
+                .struct_error(
+                    span,
+                    "cannot construct a mutable trait object `mut Trait` from a read-only pointer",
+                )
                 .with_hint("ensure the source pointer is `*mut T`")
                 .emit();
             return TypeId::ERROR;
@@ -2080,7 +2091,11 @@ impl<'a> ExprChecker<'a> {
 
         if !is_inner_ptr {
             let inner_str = self.ctx.ty_to_string(inner_ty);
-            self.ctx.struct_error(inner.span, "trait objects can only be constructed from pointers")
+            self.ctx
+                .struct_error(
+                    inner.span,
+                    "trait objects can only be constructed from pointers",
+                )
                 .with_hint(format!("provided value is of type `{}`", inner_str))
                 .emit();
             return TypeId::ERROR;
@@ -2088,7 +2103,15 @@ impl<'a> ExprChecker<'a> {
 
         if !self.check_trait_impl(inner_ty, exp_norm) {
             let trait_str = self.ctx.ty_to_string(exp_norm);
-            self.ctx.struct_error(span, format!("the provided pointer type does not implement trait `{}`", trait_str)).emit();
+            self.ctx
+                .struct_error(
+                    span,
+                    format!(
+                        "the provided pointer type does not implement trait `{}`",
+                        trait_str
+                    ),
+                )
+                .emit();
             return TypeId::ERROR;
         }
 
@@ -2495,7 +2518,8 @@ impl<'a> ExprChecker<'a> {
     /// 专门校验 @asm(.{ ... }) 结构
     fn check_asm_call(&mut self, args: &[Expr], span: Span) -> TypeId {
         if args.len() != 1 {
-            self.ctx.struct_error(span, "`@asm` expects exactly one anonymous struct argument")
+            self.ctx
+                .struct_error(span, "`@asm` expects exactly one anonymous struct argument")
                 .with_hint("example: `@asm(.{ asm: \"nop\", volatile: true })`")
                 .emit();
             return TypeId::ERROR;
@@ -2503,11 +2527,19 @@ impl<'a> ExprChecker<'a> {
 
         let config_arg = &args[0];
         let fields = match &config_arg.kind {
-            ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(f), type_node: None } => f,
+            ExprKind::DataInit {
+                literal: ast::DataLiteralKind::Struct(f),
+                type_node: None,
+            } => f,
             _ => {
-                self.ctx.struct_error(config_arg.span, "`@asm` argument must be an untyped anonymous struct `.{ ... }`").emit();
+                self.ctx
+                    .struct_error(
+                        config_arg.span,
+                        "`@asm` argument must be an untyped anonymous struct `.{ ... }`",
+                    )
+                    .emit();
                 // 继续推导内部可能的错误以防止级联，但标记外层为 ERROR
-                self.check_expr(config_arg, None); 
+                self.check_expr(config_arg, None);
                 return TypeId::ERROR;
             }
         };
@@ -2520,11 +2552,21 @@ impl<'a> ExprChecker<'a> {
                 "asm" => {
                     has_asm = true;
                     match &field.value.kind {
-                        ExprKind::String(_) => { self.check_expr(&field.value, None); }
-                        ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } => {
+                        ExprKind::String(_) => {
+                            self.check_expr(&field.value, None);
+                        }
+                        ExprKind::DataInit {
+                            literal: ast::DataLiteralKind::Array(elems),
+                            ..
+                        } => {
                             for e in elems {
                                 if !matches!(e.kind, ExprKind::String(_)) {
-                                    self.ctx.struct_error(e.span, "all elements in asm array must be string literals").emit();
+                                    self.ctx
+                                        .struct_error(
+                                            e.span,
+                                            "all elements in asm array must be string literals",
+                                        )
+                                        .emit();
                                 }
                                 self.check_expr(e, None);
                             }
@@ -2535,11 +2577,15 @@ impl<'a> ExprChecker<'a> {
                     }
                 }
                 "outputs" | "inputs" => {
-                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                    if let ExprKind::DataInit {
+                        literal: ast::DataLiteralKind::Struct(regs),
+                        ..
+                    } = &field.value.kind
+                    {
                         for reg_field in regs {
                             let val_ty = self.check_expr(&reg_field.value, None);
                             let val_ty_str = self.ctx.ty_to_string(val_ty);
-                            
+
                             if field_name == "outputs" && val_ty != TypeId::ERROR {
                                 if !self.is_mut_pointer(val_ty) {
                                     self.ctx.struct_error(reg_field.value.span, "inline assembly outputs must be bound to mutable pointers (e.g., `status.&`)")
@@ -2554,7 +2600,11 @@ impl<'a> ExprChecker<'a> {
                     }
                 }
                 "clobbers" => {
-                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Array(clobbers), .. } = &field.value.kind {
+                    if let ExprKind::DataInit {
+                        literal: ast::DataLiteralKind::Array(clobbers),
+                        ..
+                    } = &field.value.kind
+                    {
                         for c in clobbers {
                             if !matches!(c.kind, ExprKind::String(_)) {
                                 self.ctx.struct_error(c.span, "clobbers must be a list of string literals (e.g., `.{ \"memory\", \"cc\" }`)").emit();
@@ -2562,7 +2612,12 @@ impl<'a> ExprChecker<'a> {
                             self.check_expr(c, None);
                         }
                     } else {
-                        self.ctx.struct_error(field.value.span, "`clobbers` must be a slice/array of strings").emit();
+                        self.ctx
+                            .struct_error(
+                                field.value.span,
+                                "`clobbers` must be a slice/array of strings",
+                            )
+                            .emit();
                         self.check_expr(&field.value, None);
                     }
                 }
@@ -2571,14 +2626,24 @@ impl<'a> ExprChecker<'a> {
                     self.check_coercion(field.value.span, TypeId::BOOL, ty);
                 }
                 _ => {
-                    self.ctx.struct_error(field.span, format!("unknown field `{}` in `@asm` configuration", field_name)).emit();
+                    self.ctx
+                        .struct_error(
+                            field.span,
+                            format!("unknown field `{}` in `@asm` configuration", field_name),
+                        )
+                        .emit();
                     self.check_expr(&field.value, None);
                 }
             }
         }
 
         if !has_asm {
-            self.ctx.struct_error(span, "`@asm` configuration is missing the required `asm` template string").emit();
+            self.ctx
+                .struct_error(
+                    span,
+                    "`@asm` configuration is missing the required `asm` template string",
+                )
+                .emit();
         }
 
         // 绑定 config_arg 的类型为 VOID，防止 AST 树产生洞
