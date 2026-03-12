@@ -563,7 +563,7 @@ pub fn outb_and_read(port: u16, data: u8) u8 {
     let status = mut u8.{undef};
 
     @asm(.{
-        asm: "out dx, al \n in al, dx",
+        asm: .{"out dx, al",  "in al, dx"},
         outputs: .{
             al: status.&      // Binds the 'al' register to the mutable pointer of 'status'
         },

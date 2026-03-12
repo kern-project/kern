@@ -11,6 +11,9 @@ fn print_usage(program_name: &str) {
     println!("  --emit-llvm    Print LLVM IR to stdout");
     println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
     println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)");
+    println!(
+        "  --freestanding Compile for a freestanding environment (do not link C runtime/libc)"
+    );
     println!("  -v, --version  Display version information and exit");
     println!("  -h, --help     Display this help and exit");
 }
@@ -43,6 +46,7 @@ fn parse_args() -> CompileOptions {
             "-O2" => options.opt_level = OptLevel::O2,
             "-O3" => options.opt_level = OptLevel::O3,
             "--emit-llvm" => options.emit_llvm_ir = true,
+            "--freestanding" => options.freestanding = true,
             "--target" => {
                 let triple_str = args.next().unwrap_or_else(|| {
                     eprintln!("Error: Expected target triple after `--target`");

@@ -75,6 +75,7 @@ pub struct CompileOptions {
     /// 允许通过 CLI 传入自定义环境变量，例如 kernc -D my_feature=true
     pub custom_defines: HashMap<String, String>,
     pub asm_dialect: AsmDialect,
+    pub freestanding: bool,
 }
 
 impl Default for CompileOptions {
@@ -87,6 +88,7 @@ impl Default for CompileOptions {
             emit_llvm_ir: false,
             custom_defines: HashMap::new(),
             asm_dialect: AsmDialect::default(),
+            freestanding: false,
         }
     }
 }

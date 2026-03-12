@@ -155,13 +155,18 @@ impl CompilerDriver {
 
         // 2. 调用 cc 进行链接
         println!("Linking...");
-        let status = std::process::Command::new("cc")
-            .arg("-nostdlib") // 告诉链接器不要引入 C 运行时 (crt1.o)
-            .arg("-no-pie") // 禁用位置无关可执行文件
-            .arg(&obj_path_str)
+        let mut cmd = std::process::Command::new("cc");
+        cmd.arg(&obj_path_str)
+            .arg("-no-pie")
             .arg("-o")
-            .arg(&self.options.output_file)
-            .status();
+            .arg(&self.options.output_file);
+
+        // 如果是 freestanding 模式，才不链接标准库
+        if self.options.freestanding {
+            cmd.arg("-nostdlib");
+        }
+
+        let status = cmd.status();
 
         match status {
             Ok(s) if s.success() => {
