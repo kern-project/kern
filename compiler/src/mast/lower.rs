@@ -1020,6 +1020,13 @@ impl<'a> Lowerer<'a> {
         subst_map: &HashMap<SymbolId, TypeId>,
         span: Span,
     ) -> MastExprKind {
+        // 拦截 @asm 宏调用
+        // 必须在查询节点类型之前，因为 @asm 不是一个真实的函数
+        if let ExprKind::Identifier(sym) = &callee.kind {
+            if self.ctx.resolve(*sym) == "@asm" {
+                return self.lower_asm_call(args, subst_map, span);
+            }
+        }
         let mut receiver_mast = None;
         let mut is_method = false;
         let mut method_field_sym = None;
@@ -1081,6 +1088,123 @@ impl<'a> Lowerer<'a> {
         } else {
             self.lower_normal_call(callee, arg_masts, subst_map)
         }
+    }
+
+    fn lower_asm_call(
+        &mut self,
+        args: &[Expr],
+        subst_map: &HashMap<SymbolId, TypeId>,
+        _span: Span,
+    ) -> MastExprKind {
+        let config_arg = &args[0];
+        let fields = if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(f), .. } = &config_arg.kind {
+            f
+        } else {
+            unreachable!()
+        };
+
+        let mut asm_template = String::new();
+        let mut is_volatile = false;
+
+        let mut outputs = Vec::new();
+        let mut inputs = Vec::new();
+        let mut clobbers = Vec::new();
+
+        for field in fields {
+            let field_name = self.ctx.resolve(field.name);
+            match field_name {
+                "asm" => {
+                    match &field.value.kind {
+                        // 支持单字符串 asm: "nop"
+                        ExprKind::String(s) => asm_template = s.clone(),
+                        // 支持数组形式 asm: .{ "out dx, al", "in al, dx" }
+                        ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } => {
+                            let mut lines = Vec::new();
+                            for e in elems {
+                                if let ExprKind::String(s) = &e.kind {
+                                    lines.push(s.as_str());
+                                }
+                            }
+                            asm_template = lines.join("\n");
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                "volatile" => {
+                    if let ExprKind::Bool(b) = &field.value.kind {
+                        is_volatile = *b;
+                    }
+                }
+                "outputs" => {
+                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                        for reg in regs {
+                            let reg_name = self.ctx.resolve(reg.name);
+                            // LLVM 约束：reg -> "=r", freg -> "=f", eax -> "={eax}"
+                            let constraint = if reg_name == "reg" { "=r".to_string() } 
+                                             else if reg_name == "freg" { "=f".to_string() } 
+                                             else { format!("={{{}}}", reg_name) };
+                            
+                            let ptr_expr = self.lower_expr(&reg.value, subst_map, None);
+                            let val_ty = self.ctx.type_registry.get_elem_type(ptr_expr.ty).unwrap();
+                            outputs.push((constraint, ptr_expr, val_ty));
+                        }
+                    }
+                }
+                "inputs" => {
+                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                        for reg in regs {
+                            let reg_name = self.ctx.resolve(reg.name);
+                            // LLVM 约束：reg -> "r", freg -> "f", eax -> "{eax}"
+                            let constraint = if reg_name == "reg" { "r".to_string() } 
+                                             else if reg_name == "freg" { "f".to_string() } 
+                                             else { format!("{{{}}}", reg_name) };
+                            
+                            let val_expr = self.lower_expr(&reg.value, subst_map, None);
+                            inputs.push((constraint, val_expr));
+                        }
+                    }
+                }
+                "clobbers" => {
+                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } = &field.value.kind {
+                        for e in elems {
+                            if let ExprKind::String(s) = &e.kind {
+                                clobbers.push(format!("~{{{}}}", s));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 组装最终的 LLVM 约束字符串 (顺序必须是: outputs, inputs, clobbers)
+        let mut all_constraints = Vec::new();
+        let mut output_ptrs = Vec::new();
+        let mut output_tys = Vec::new();
+        for (c, ptr, ty) in outputs {
+            all_constraints.push(c);
+            output_ptrs.push(ptr);
+            output_tys.push(ty);
+        }
+        
+        let mut input_args = Vec::new();
+        for (c, expr) in inputs {
+            all_constraints.push(c);
+            input_args.push(expr);
+        }
+
+        for c in clobbers {
+            all_constraints.push(c);
+        }
+
+        MastExprKind::Asm(MastAsmBlock {
+            asm_template,
+            constraints: all_constraints.join(","),
+            input_args,
+            output_ptrs,
+            output_tys,
+            is_volatile,
+        })
     }
 
     fn lower_method_call(

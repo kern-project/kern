@@ -1367,6 +1367,15 @@ impl<'a> ExprChecker<'a> {
     // ==========================================
 
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> TypeId {
+        // 1. 拦截 @asm 宏调用
+        // 这必须在解析 callee_ty 之前，因为 @asm 并没有在全局作用域中注册
+        if let ExprKind::Identifier(sym) = &callee.kind {
+            if self.ctx.resolve(*sym) == "@asm" {
+                // 确保 @asm 作为一个整体被正确类型化为 void，防止产生 AST 空洞
+                self.ctx.node_types.insert(callee.id, TypeId::VOID);
+                return self.check_asm_call(args, span);
+            }
+        }
         let callee_ty = self.check_expr(callee, None);
         let norm_callee = self.strip_mut(callee_ty);
 
@@ -1378,34 +1387,34 @@ impl<'a> ExprChecker<'a> {
             return TypeId::ERROR;
         }
 
-        // 1. 获取准确的函数签名 (处理泛型单态化替换)
+        // 2. 获取准确的函数签名 (处理泛型单态化替换)
         let sig_ty = self.resolve_callee_signature(norm_callee);
 
-        // 2. 校验签名并执行分发
+        // 3. 校验签名并执行分发
         if let TypeKind::Function {
             params,
             ret,
             is_variadic,
         } = self.ctx.type_registry.get(sig_ty).clone()
         {
-            // 3. 探查是否是方法调用，提取接收者 (Receiver) 信息
+            // a. 探查是否是方法调用，提取接收者 (Receiver) 信息
             let (is_method, receiver_ty) = self.resolve_method_context(callee);
 
-            // 4. 校验参数数量 (Arity)
+            // b. 校验参数数量 (Arity)
             self.check_call_arity(args.len(), params.len(), is_method, is_variadic, span);
 
-            // 5. 校验方法接收者上下文 (隐式 Self 匹配)
+            // c. 校验方法接收者上下文 (隐式 Self 匹配)
             if is_method && !params.is_empty() {
                 self.check_method_receiver(params[0], receiver_ty, callee.span);
             }
 
-            // 6. 逐个校验传入参数 (包含 C ABI 可变参数规则)
+            // d. 逐个校验传入参数 (包含 C ABI 可变参数规则)
             self.check_call_arguments(args, &params, is_method, is_variadic);
 
             return ret;
         }
 
-        // 7. 兜底报错：该类型不可调用
+        // 4. 兜底报错：该类型不可调用
         let callee_str = self.ctx.ty_to_string(callee_ty);
         self.ctx
             .struct_error(callee.span, "expression is not callable")
@@ -2476,6 +2485,117 @@ impl<'a> ExprChecker<'a> {
                 true
             }
             _ => gen_norm == con_norm,
+        }
+    }
+
+    // ==========================================
+    //            Inline Assembly (@asm)
+    // ==========================================
+
+    /// 专门校验 @asm(.{ ... }) 结构
+    fn check_asm_call(&mut self, args: &[Expr], span: Span) -> TypeId {
+        if args.len() != 1 {
+            self.ctx.struct_error(span, "`@asm` expects exactly one anonymous struct argument")
+                .with_hint("example: `@asm(.{ asm: \"nop\", volatile: true })`")
+                .emit();
+            return TypeId::ERROR;
+        }
+
+        let config_arg = &args[0];
+        let fields = match &config_arg.kind {
+            ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(f), type_node: None } => f,
+            _ => {
+                self.ctx.struct_error(config_arg.span, "`@asm` argument must be an untyped anonymous struct `.{ ... }`").emit();
+                // 继续推导内部可能的错误以防止级联，但标记外层为 ERROR
+                self.check_expr(config_arg, None); 
+                return TypeId::ERROR;
+            }
+        };
+
+        let mut has_asm = false;
+
+        for field in fields {
+            let field_name = self.ctx.resolve(field.name).to_string();
+            match field_name.as_str() {
+                "asm" => {
+                    has_asm = true;
+                    match &field.value.kind {
+                        ExprKind::String(_) => { self.check_expr(&field.value, None); }
+                        ExprKind::DataInit { literal: ast::DataLiteralKind::Array(elems), .. } => {
+                            for e in elems {
+                                if !matches!(e.kind, ExprKind::String(_)) {
+                                    self.ctx.struct_error(e.span, "all elements in asm array must be string literals").emit();
+                                }
+                                self.check_expr(e, None);
+                            }
+                        }
+                        _ => {
+                            self.ctx.struct_error(field.value.span, "`asm` template must be a string literal or an array of strings").emit();
+                        }
+                    }
+                }
+                "outputs" | "inputs" => {
+                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Struct(regs), .. } = &field.value.kind {
+                        for reg_field in regs {
+                            let val_ty = self.check_expr(&reg_field.value, None);
+                            let val_ty_str = self.ctx.ty_to_string(val_ty);
+                            
+                            if field_name == "outputs" && val_ty != TypeId::ERROR {
+                                if !self.is_mut_pointer(val_ty) {
+                                    self.ctx.struct_error(reg_field.value.span, "inline assembly outputs must be bound to mutable pointers (e.g., `status.&`)")
+                                        .with_hint(format!("type found: {}", val_ty_str))
+                                        .emit();
+                                }
+                            }
+                        }
+                    } else {
+                        self.ctx.struct_error(field.value.span, format!("`{}` must be an anonymous struct mapping registers to variables", field_name)).emit();
+                        self.check_expr(&field.value, None);
+                    }
+                }
+                "clobbers" => {
+                    if let ExprKind::DataInit { literal: ast::DataLiteralKind::Array(clobbers), .. } = &field.value.kind {
+                        for c in clobbers {
+                            if !matches!(c.kind, ExprKind::String(_)) {
+                                self.ctx.struct_error(c.span, "clobbers must be a list of string literals (e.g., `.{ \"memory\", \"cc\" }`)").emit();
+                            }
+                            self.check_expr(c, None);
+                        }
+                    } else {
+                        self.ctx.struct_error(field.value.span, "`clobbers` must be a slice/array of strings").emit();
+                        self.check_expr(&field.value, None);
+                    }
+                }
+                "volatile" => {
+                    let ty = self.check_expr(&field.value, Some(TypeId::BOOL));
+                    self.check_coercion(field.value.span, TypeId::BOOL, ty);
+                }
+                _ => {
+                    self.ctx.struct_error(field.span, format!("unknown field `{}` in `@asm` configuration", field_name)).emit();
+                    self.check_expr(&field.value, None);
+                }
+            }
+        }
+
+        if !has_asm {
+            self.ctx.struct_error(span, "`@asm` configuration is missing the required `asm` template string").emit();
+        }
+
+        // 绑定 config_arg 的类型为 VOID，防止 AST 树产生洞
+        self.ctx.node_types.insert(config_arg.id, TypeId::VOID);
+
+        // 内联汇编不返回值，通过 outputs 的指针写入状态
+        TypeId::VOID
+    }
+
+    /// 辅助方法：判断内联汇编 output 绑定的类型是否为可变指针 (`*mut T` 或 `^mut T`)
+    fn is_mut_pointer(&self, ty: TypeId) -> bool {
+        let norm = self.ctx.type_registry.normalize(ty);
+        match self.ctx.type_registry.get(norm) {
+            TypeKind::Pointer(inner) | TypeKind::VolatilePtr(inner) => {
+                self.ctx.type_registry.is_mut(*inner)
+            }
+            _ => false,
         }
     }
 }
