@@ -767,6 +767,18 @@ impl<'a> Parser<'a> {
             | TokenType::StringLiteral
             | TokenType::CharLiteral => self.parse_literal_expr(token),
 
+            // 处理布尔字面量关键字
+            TokenType::True => Ok(Expr {
+                id: self.new_id(),
+                span,
+                kind: ExprKind::Bool(true),
+            }),
+            TokenType::False => Ok(Expr {
+                id: self.new_id(),
+                span,
+                kind: ExprKind::Bool(false),
+            }),
+
             TokenType::Identifier => {
                 let name = self.intern_token(token);
                 Ok(Expr {
@@ -1445,6 +1457,7 @@ impl<'a> Parser<'a> {
         let mut result = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let attributes = self.parse_attributes(false).unwrap_or_default(); // 拦截语句级属性
             if self.check(TokenType::Defer) {
                 let defer_t = self.advance();
                 let expr = self.parse_expression(Precedence::Lowest)?;
@@ -1459,6 +1472,7 @@ impl<'a> Parser<'a> {
                 stmts.push(Stmt {
                     id: self.new_id(),
                     span: defer_expr.span,
+                    attributes,
                     kind: StmtKind::ExprStmt(defer_expr),
                 });
                 continue;
@@ -1479,16 +1493,22 @@ impl<'a> Parser<'a> {
                 stmts.push(Stmt {
                     id: self.new_id(),
                     span: expr.span,
+                    attributes,
                     kind: StmtKind::ExprStmt(expr),
                 });
             } else if self.check(TokenType::RBrace) {
                 // 如果紧跟着是 }，说明这是整个 Block 的返回值
+                // 严禁在尾随返回值表达式上附加属性
+                if !attributes.is_empty() {
+                    self.add_error(attributes[0].span, "Attributes are not allowed on the trailing return expression of a block. Consider adding a semicolon to make it a statement.".to_string());
+                }
                 result = Some(Box::new(expr));
             } else if is_block_like {
                 // 如果是块级表达式，没有分号也是合法的独立语句
                 stmts.push(Stmt {
                     id: self.new_id(),
                     span: expr.span,
+                    attributes,
                     kind: StmtKind::ExprStmt(expr),
                 });
             } else {
@@ -1497,6 +1517,7 @@ impl<'a> Parser<'a> {
                 stmts.push(Stmt {
                     id: self.new_id(),
                     span: expr.span,
+                    attributes,
                     kind: StmtKind::ExprStmt(expr),
                 });
             }
@@ -1865,24 +1886,36 @@ impl<'a> Parser<'a> {
 
     // Top Level
     pub fn parse_module(&mut self) -> ParseResult<Module> {
+        // 先解析文件最顶部的 #![...] 
+        let attributes = self.parse_attributes(true).unwrap_or_default();
+
         let mut decls = Vec::new();
         while !self.check(TokenType::Eof) {
             match self.parse_decl() {
                 Ok(Some(decl)) => decls.push(decl),
                 Ok(None) => {} // Skipped
                 Err(_) => {
-                    // Error already reported, sync and continue
                     self.synchronize();
                 }
             }
         }
         Ok(Module {
             path: "test.kn".to_string(),
+            attributes, 
             decls,
         })
     }
 
     fn parse_decl(&mut self) -> ParseResult<Option<Decl>> {
+        // 拦截 attributes 
+        let attributes = self.parse_attributes(false).unwrap_or_default();
+
+        if self.check(TokenType::Eof) {
+            if !attributes.is_empty() {
+                self.add_error(attributes[0].span, "Attributes cannot be placed at the end of the file".to_string());
+            }
+            return Ok(None);
+        }
         let is_pub = self.match_token(&[TokenType::Pub]);
         let start_span = if is_pub {
             self.stream.prev_span()
@@ -1901,7 +1934,7 @@ impl<'a> Parser<'a> {
         }
 
         let token = self.peek();
-        match token.tag {
+        let decl_res = match token.tag {
             TokenType::Fn => Ok(Some(self.parse_fn_decl(start_span, is_pub, is_extern)?)),
             TokenType::Type => Ok(Some(
                 self.parse_type_alias_decl(start_span, is_pub, is_extern)?,
@@ -1930,6 +1963,13 @@ impl<'a> Parser<'a> {
                 self.add_error(token.span, format!("Expected declaration, found '{}'", txt));
                 Err(())
             }
+        };
+        match decl_res {
+            Ok(Some(mut decl)) => {
+                decl.attributes = attributes;
+                Ok(Some(decl))
+            },
+            other => other,
         }
     }
 
@@ -1947,12 +1987,12 @@ impl<'a> Parser<'a> {
 
         let ret_type = self.parse_type()?;
 
-        let body = if is_extern {
-            self.expect(TokenType::Semicolon)?;
-            None
-        } else {
+        let body = if self.check(TokenType::LBrace) {
             let brace = self.expect(TokenType::LBrace)?;
             Some(Box::new(self.parse_block_expr(brace.span)?))
+        } else {
+            self.expect(TokenType::Semicolon)?;
+            None
         };
 
         let end = if let Some(ref b) = body {
@@ -1966,6 +2006,7 @@ impl<'a> Parser<'a> {
             span: start.to(end),
             name: name_id,
             is_pub,
+            attributes: vec![],
             kind: DeclKind::Function {
                 generics,
                 params,
@@ -1988,6 +2029,7 @@ impl<'a> Parser<'a> {
 
         let mut decls = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let attributes = self.parse_attributes(false).unwrap_or_default(); // 拦截
             let is_pub = self.match_token(&[TokenType::Pub]);
             let d_start = if is_pub {
                 self.stream.prev_span()
@@ -1996,9 +2038,13 @@ impl<'a> Parser<'a> {
             };
 
             if self.check(TokenType::Fn) {
-                decls.push(self.parse_fn_decl(d_start, is_pub, true)?);
+                let mut d = self.parse_fn_decl(d_start, is_pub, true)?;
+                d.attributes = attributes; // 注入
+                decls.push(d);
             } else if self.check(TokenType::Static) {
-                decls.push(self.parse_global_var_decl(d_start, is_pub, true)?);
+                let mut d = self.parse_global_var_decl(d_start, is_pub, true)?;
+                d.attributes = attributes; // 注入
+                decls.push(d);
             } else {
                 self.error_at_current("Only fn and static allowed in extern".to_string());
                 self.synchronize();
@@ -2011,6 +2057,7 @@ impl<'a> Parser<'a> {
             span: start.to(end.span),
             name,
             is_pub: false,
+            attributes: vec![],
             kind: DeclKind::ExternBlock { abi, decls },
         })
     }
@@ -2027,6 +2074,7 @@ impl<'a> Parser<'a> {
 
         let mut decls = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let attributes = self.parse_attributes(false).unwrap_or_default(); // 拦截
             let is_pub = self.match_token(&[TokenType::Pub]);
             let d_start = if is_pub {
                 self.stream.prev_span()
@@ -2034,7 +2082,9 @@ impl<'a> Parser<'a> {
                 self.peek().span
             };
             if self.check(TokenType::Fn) {
-                decls.push(self.parse_fn_decl(d_start, is_pub, false)?);
+                let mut d = self.parse_fn_decl(d_start, is_pub, false)?;
+                d.attributes = attributes; // 注入
+                decls.push(d);
             } else {
                 self.error_at_current("Only fn allowed in impl".to_string());
                 self.synchronize();
@@ -2047,6 +2097,7 @@ impl<'a> Parser<'a> {
             span: start.to(end.span),
             name,
             is_pub: false,
+            attributes: vec![],
             kind: DeclKind::Impl {
                 generics,
                 target_type,
@@ -2096,7 +2147,7 @@ impl<'a> Parser<'a> {
             span: start.to(end),
             name: name_id,
             is_pub,
-            // ✅ 瘦身后的 Var
+            attributes: vec![],
             kind: DeclKind::Var {
                 value,
                 is_static,
@@ -2140,6 +2191,7 @@ impl<'a> Parser<'a> {
             span: start.to(end),
             name: name_id,
             is_pub,
+            attributes: vec![],
             kind: DeclKind::TypeAlias {
                 generics,
                 bounds,
@@ -2209,6 +2261,7 @@ impl<'a> Parser<'a> {
             span: start.to(self.stream.prev_span()),
             name,
             is_pub,
+            attributes: vec![],
             kind: DeclKind::Use {
                 kind,
                 path,
@@ -2289,5 +2342,90 @@ impl<'a> Parser<'a> {
                 Err(())
             }
         }
+    }
+}
+
+impl<'a> Parser<'a> {
+    // ==========================================
+    //            Attributes Parsing
+    // ==========================================
+
+    /// 判断当前是否处于属性标记的起始位置，避免与 `#arr` (取长度) 冲突
+    fn is_at_attribute(&mut self) -> bool {
+        if self.check(TokenType::Hash) {
+            let next = self.stream.peek_nth(1).tag;
+            if next == TokenType::LBracket {
+                return true; // #[
+            }
+            if next == TokenType::Bang && self.stream.peek_nth(2).tag == TokenType::LBracket {
+                return true; // #![
+            }
+        }
+        false
+    }
+
+    /// 解析连续的属性块
+    fn parse_attributes(&mut self, expect_module_level: bool) -> ParseResult<Vec<Attribute>> {
+        let mut attrs = Vec::new();
+        
+        while self.is_at_attribute() {
+            let is_bang = self.stream.peek_nth(1).tag == TokenType::Bang;
+            
+            // 如果期望解析模块级 #![...]，但遇到了 #[...]，立刻跳出循环，留给下一级去吃
+            // 或者期望解析 #[...]，但遇到了 #![...]，也跳出
+            if is_bang != expect_module_level {
+                break;
+            }
+
+            let hash_span = self.advance().span; // 消费 `#`
+            
+            let mut is_module_level = false;
+            if self.match_token(&[TokenType::Bang]) {
+                is_module_level = true;
+            }
+
+            self.expect(TokenType::LBracket)?;
+
+            let kind = if self.match_token(&[TokenType::If]) {
+                // 模式 1: 条件编译 #[if(expr)]
+                self.expect(TokenType::LParen)?;
+                let expr = self.parse_expression(Precedence::Lowest)?;
+                self.expect(TokenType::RParen)?;
+                
+                if self.match_token(&[TokenType::Comma]) {
+                    self.add_error(self.stream.prev_span(), "`#[if(...)]` must be standalone and cannot be mixed with metadata in the same bracket".to_string());
+                }
+                
+                AttributeKind::If(Box::new(expr))
+            } else {
+                // 模式 2: 元数据 #[cold, export_name("foo")]
+                let mut items = Vec::new();
+                while !self.check(TokenType::RBracket) && !self.check(TokenType::Eof) {
+                    let ident_tok = self.expect(TokenType::Identifier)?;
+                    let ident_id = self.intern_token(ident_tok);
+
+                    if self.match_token(&[TokenType::LParen]) {
+                        let expr = self.parse_expression(Precedence::Lowest)?;
+                        self.expect(TokenType::RParen)?;
+                        items.push(MetaItem::Call(ident_id, Box::new(expr)));
+                    } else {
+                        items.push(MetaItem::Marker(ident_id));
+                    }
+
+                    if !self.match_token(&[TokenType::Comma]) {
+                        break;
+                    }
+                }
+                AttributeKind::Meta(items)
+            };
+
+            let rb = self.expect(TokenType::RBracket)?;
+            attrs.push(Attribute {
+                span: hash_span.to(rb.span),
+                is_module_level,
+                kind,
+            });
+        }
+        Ok(attrs)
     }
 }

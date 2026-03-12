@@ -52,11 +52,21 @@ impl CompilerDriver {
         builtin.inject();
 
         // 4. 智能按需模块加载
-        let asts = {
+        let mut asts = {
             let mut loader = crate::sema::module_loader::ModuleLoader::new(&mut ctx);
             loader.load_root(&self.options.input_file);
             std::mem::take(&mut loader.asts)
         };
+
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
+
+        // 4.5. AST 条件剪枝 (Prune Pass)
+        // 在任何语义分析开始之前，剔除所有平台不匹配的代码
+        let mut pruner = crate::sema::prune::Pruner::new(&mut ctx);
+        pruner.prune_all(&mut asts);
 
         if ctx.has_errors() {
             ctx.print_diagnostics();
@@ -120,8 +130,11 @@ impl CompilerDriver {
             &resolve_fn,
         );
 
-        // 传递目标架构给 LLVM
-        // codegen.set_target_machine(&self.options.target); // 如果你在 codegen 里加了这个方法
+        // 🌟 将配置层的枚举映射到 LLVM 的枚举
+        codegen.asm_dialect = match self.options.asm_dialect {
+            config::AsmDialect::Intel => inkwell::InlineAsmDialect::Intel,
+            config::AsmDialect::Att => inkwell::InlineAsmDialect::ATT,
+        };
 
         codegen.compile(&mast_module);
 
@@ -130,29 +143,30 @@ impl CompilerDriver {
             return true; // 如果只打印 IR，就不需要走后续的二进制生成了
         }
 
-        // 决定临时 .o 文件的路径 (比如把 a.out 变成 a.out.o)
-        let obj_path = std::path::Path::new(&self.options.output_file).with_extension("o");
-        let obj_path_str = obj_path.to_str().unwrap();
+        // 决定临时 .o 文件的路径 (不要用 with_extension，直接加后缀)
+        let obj_path_str = format!("{}.tmp.o", self.options.output_file);
 
-        // 1. 调用刚刚写的 emit_to_file 生成 .o 文件
-        if let Err(e) = codegen.emit_to_file(&self.options.target.triple.to_string(), obj_path_str)
+        // 1. 调用 emit_to_file 生成临时的 .o 文件
+        if let Err(e) = codegen.emit_to_file(&self.options.target.triple.to_string(), &obj_path_str)
         {
             eprintln!("Error: LLVM failed to generate object file: {}", e);
             return false;
         }
 
-        // 2. 调用系统默认的 C 编译器 (cc/clang/gcc) 进行链接
+        // 2. 调用 cc 进行链接
         println!("Linking...");
-        let status = std::process::Command::new("cc") // 这里默认使用系统 cc
-            .arg(obj_path_str)
+        let status = std::process::Command::new("cc") 
+            .arg("-nostdlib")     // 告诉链接器不要引入 C 运行时 (crt1.o)
+            .arg("-no-pie")       // 禁用位置无关可执行文件
+            .arg(&obj_path_str)
             .arg("-o")
             .arg(&self.options.output_file)
             .status();
 
         match status {
             Ok(s) if s.success() => {
-                // 链接成功后，把临时的 .o 文件删掉
-                let _ = std::fs::remove_file(obj_path);
+                // 链接成功后，把临时文件删掉
+                let _ = std::fs::remove_file(&obj_path_str);
                 println!("Successfully compiled to `{}`", self.options.output_file);
                 true
             }
