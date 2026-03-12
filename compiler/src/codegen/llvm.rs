@@ -298,9 +298,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     fn declare_globals(&mut self, globals: &[MastGlobal]) {
         for g in globals {
             // 防止同名 extern 全局变量冲突
-            if let Some(existing_global) = self.module.get_global(&g.name) {
-                self.globals.insert(g.id, existing_global);
-                continue;
+            if g.is_extern {
+                if let Some(existing_global) = self.module.get_global(&g.name) {
+                    self.globals.insert(g.id, existing_global);
+                    continue;
+                }
             }
 
             let llvm_ty = self.get_llvm_type(g.ty);
@@ -344,9 +346,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
             // 防止同名 extern 函数被 LLVM 自动重命名为 `.1`
             // 如果 LLVM 符号表中已经有了这个名字的函数，直接取出复用
-            if let Some(existing_func) = self.module.get_function(&f.name) {
-                self.functions.insert(f.id, existing_func);
-                continue;
+            if f.is_extern {
+                if let Some(existing_func) = self.module.get_function(&f.name) {
+                    self.functions.insert(f.id, existing_func);
+                    continue;
+                }
             }
 
             let llvm_func = self.module.add_function(&f.name, fn_type, None);
@@ -462,7 +466,32 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             MastExprKind::Var(name) => self.compile_var_ref(*name, expected_llvm_ty),
             MastExprKind::GlobalRef(mono_id) => self.compile_global_ref(*mono_id, expected_llvm_ty),
             MastExprKind::FuncRef(mono_id) => self.compile_func_ref(*mono_id),
-            MastExprKind::AddressOf(operand) => self.compile_lvalue(operand).into(),
+            MastExprKind::AddressOf(operand) => {
+                match &operand.kind {
+                    // 如果本身就是合法的左值（变量、全局变量、字段访问、索引、解引用），直接安全取地址
+                    MastExprKind::Var(_)
+                    | MastExprKind::GlobalRef(_)
+                    | MastExprKind::FieldAccess { .. }
+                    | MastExprKind::IndexAccess { .. }
+                    | MastExprKind::Deref(_) => {
+                        self.compile_lvalue(operand).into()
+                    }
+                    // 如果是右值取地址（如 i32.{ 404 }.&），立即将其实体化到栈上
+                    _ => {
+                        let rval = self.compile_expr(operand);
+                        let llvm_ty = self.get_llvm_type(operand.ty);
+                        
+                        // 在当前函数的 entry block 开辟一个隐式的临时变量
+                        let temp_ptr = self.create_entry_block_alloca(llvm_ty, "tmp_addrof");
+                        
+                        // 将右值存入内存
+                        self.builder.build_store(temp_ptr, rval).unwrap();
+                        
+                        // 返回这个临时变量的地址
+                        temp_ptr.into()
+                    }
+                }
+            }
             MastExprKind::Deref(operand) => self.compile_deref(operand, expected_llvm_ty),
 
             // === 3. 聚合数据 (Struct/Union/Array) 构造与访问 ===
@@ -505,7 +534,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 expr.ty,
                 expected_llvm_ty,
             ),
-            MastExprKind::Loop(body) => self.compile_loop(body),
+            MastExprKind::Loop { body, latch } => self.compile_loop(body, latch.as_ref()),
             MastExprKind::Break => self.compile_break(),
             MastExprKind::Continue => self.compile_continue(),
             MastExprKind::Switch {
@@ -1205,28 +1234,46 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         }
     }
 
-    fn compile_loop(&mut self, body: &MastBlock) -> BasicValueEnum<'ctx> {
+    fn compile_loop(&mut self, body: &MastBlock, latch: Option<&MastBlock>) -> BasicValueEnum<'ctx> {
         let parent_func = self
             .builder
             .get_insert_block()
             .unwrap()
             .get_parent()
             .unwrap();
+
         let loop_bb = self.context.append_basic_block(parent_func, "loop");
+        let latch_bb = self.context.append_basic_block(parent_func, "latch");
         let merge_bb = self.context.append_basic_block(parent_func, "loopcont");
 
         self.builder.build_unconditional_branch(loop_bb).unwrap();
         self.builder.position_at_end(loop_bb);
-        self.loop_targets.push((loop_bb, merge_bb));
+
+        // 把 latch_bb 压入栈,这样遇到 continue 时就会跳转到 latch_bb
+        self.loop_targets.push((latch_bb, merge_bb));
 
         self.compile_block(body);
 
         let loop_exit_bb = self.builder.get_insert_block().unwrap();
         if loop_exit_bb.get_terminator().is_none() {
-            self.builder.build_unconditional_branch(loop_bb).unwrap();
+            // 循环体自然结束，跳入 latch 块
+            self.builder.build_unconditional_branch(latch_bb).unwrap();
         }
 
         self.loop_targets.pop();
+
+        // --- 编译 Latch Block (步进逻辑) ---
+        self.builder.position_at_end(latch_bb);
+        if let Some(latch_block) = latch {
+            self.compile_block(latch_block);
+        }
+        let latch_exit_bb = self.builder.get_insert_block().unwrap();
+        if latch_exit_bb.get_terminator().is_none() {
+            // 步进执行完毕，跳回循环头进行新一轮判断
+            self.builder.build_unconditional_branch(loop_bb).unwrap();
+        }
+
+        // --- 编译结束后的出口 ---
         self.builder.position_at_end(merge_bb);
         self.context.i8_type().const_zero().into()
     }
@@ -1456,24 +1503,47 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
             // ArrayDecay: [N]T -> []T (将数组隐式转换为带长度的胖指针)
             MastCastKind::ArrayToSlice => {
-                let slice_ty = target_llvm_ty.into_struct_type();
-                let mut slice_val = slice_ty.const_zero();
+                // 临时变量具象化 (Materialize Temporary)
+                let array_ptr = match &operand.kind {
+                    // 如果本身就是合法的左值（比如变量名），直接取它的地址，避免无意义的拷贝
+                    MastExprKind::Var(_)
+                    | MastExprKind::GlobalRef(_)
+                    | MastExprKind::FieldAccess { .. }
+                    | MastExprKind::IndexAccess { .. }
+                    | MastExprKind::Deref(_) => {
+                        self.compile_lvalue(operand)
+                    }
+                    // 如果是右值（比如 ArrayInit 临时数组），在栈上开辟临时空间存进去
+                    _ => {
+                        let array_val = self.compile_expr(operand);
+                        let array_llvm_ty = self.get_llvm_type(operand.ty);
+                        let temp_ptr = self.create_entry_block_alloca(array_llvm_ty, "tmp_array_for_slice");
+                        self.builder.build_store(temp_ptr, array_val).unwrap();
+                        temp_ptr
+                    }
+                };
 
-                let array_ptr = self.compile_lvalue(operand);
+                // 获取长度
+                let array_len = if let TypeKind::Array { len, .. } = self
+                    .type_registry
+                    .get(self.type_registry.normalize(operand.ty))
+                {
+                    *len
+                } else {
+                    unreachable!()
+                };
+
+                // 组装 Slice 胖指针
+                let slice_llvm_ty = target_llvm_ty.into_struct_type();
+                let mut slice_val = slice_llvm_ty.get_undef();
+
                 slice_val = self
                     .builder
                     .build_insert_value(slice_val, array_ptr, 0, "slice_ptr")
                     .unwrap()
                     .into_struct_value();
 
-                let norm_op_ty = self.type_registry.normalize(operand.ty);
-                let len = if let TypeKind::Array { len, .. } = self.type_registry.get(norm_op_ty) {
-                    *len
-                } else {
-                    0
-                };
-
-                let len_val = self.context.i64_type().const_int(len, false);
+                let len_val = self.context.i64_type().const_int(array_len as u64, false);
                 slice_val = self
                     .builder
                     .build_insert_value(slice_val, len_val, 1, "slice_len")
@@ -1481,14 +1551,6 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     .into_struct_value();
 
                 slice_val.into()
-            }
-            MastCastKind::SliceToPtr => {
-                let fat_ptr = val.into_struct_value();
-                self.builder
-                    .build_extract_value(fat_ptr, 0, "slice_ptr")
-                    .unwrap()
-                    .into_pointer_value()
-                    .into()
             }
         }
     }
