@@ -1032,58 +1032,7 @@ impl<'a> ExprChecker<'a> {
         let f_norm = self.strip_mut(from);
         let t_norm = self.strip_mut(to);
 
-        // === 1. Trait Object 强转 ===
-        if let TypeKind::TraitObject(to_def_id, _) = self.ctx.type_registry.get(t_norm) {
-            let is_to_mut = self.is_mut_type(to);
-            let is_from_mut_ptr = self.is_mutable_pointer(from);
-
-            if is_to_mut && !is_from_mut_ptr {
-                self.ctx
-                    .struct_error(
-                        span,
-                        "cannot cast a read-only pointer to a mutable trait object `mut Trait`",
-                    )
-                    .with_hint("ensure the source pointer is `*mut T`")
-                    .emit();
-                return;
-            }
-
-            // 🌟 修复: 检查 from 是否已经是 TraitObject
-            let is_from_ptr = matches!(
-                self.ctx.type_registry.get(f_norm),
-                TypeKind::Pointer(_) | TypeKind::VolatilePtr(_)
-            );
-            let is_from_trait_obj = matches!(
-                self.ctx.type_registry.get(f_norm),
-                TypeKind::TraitObject(..)
-            );
-
-            if !is_from_ptr && !is_from_trait_obj {
-                let from_str = self.ctx.ty_to_string(from);
-                self.ctx
-                    .struct_error(
-                        span,
-                        "only pointers or trait objects can be cast to a trait object",
-                    )
-                    .with_hint(format!("source type is `{}`", from_str))
-                    .emit();
-                return;
-            }
-
-            let sym = self.ctx.defs[to_def_id.0 as usize].name().unwrap();
-            if !self.check_trait_impl(from, t_norm) {
-                let trait_name = self.ctx.resolve(sym);
-                self.ctx
-                    .struct_error(
-                        span,
-                        format!("the source type does not implement trait `{}`", trait_name),
-                    )
-                    .emit();
-            }
-            return;
-        }
-
-        // === 2. 常规的 Bit-Pattern 强转 ===
+        // === 纯粹的 Bit-Pattern 强转 ===
         let is_f_int = self.ctx.type_registry.is_integer(f_norm);
         let is_t_int = self.ctx.type_registry.is_integer(t_norm);
         let is_f_ptr = matches!(
@@ -1094,23 +1043,21 @@ impl<'a> ExprChecker<'a> {
             self.ctx.type_registry.get(t_norm),
             TypeKind::Pointer(_) | TypeKind::VolatilePtr(_)
         );
-        let is_f_slice = matches!(self.ctx.type_registry.get(f_norm), TypeKind::Slice(_));
 
-        if is_f_slice && is_t_ptr {
-            return;
-        }
         if (is_f_int && is_t_int)
             || (is_f_ptr && is_t_ptr)
             || (is_f_int && is_t_ptr)
             || (is_f_ptr && is_t_int)
         {
-            return;
+            return; // 允许的转换
         }
 
         let from_str = self.ctx.ty_to_string(from);
         let to_str = self.ctx.ty_to_string(to);
         self.ctx.struct_error(span, "invalid `as` cast")
-            .with_hint("`as` only supports bit-pattern preservation (e.g., int to ptr) or Trait Object construction")
+            .with_hint("`as` is strictly limited to primitive bit-pattern casts (e.g., int to ptr, i32 to u32)")
+            .with_hint("for trait objects, use constructor syntax: `Trait.{ ptr }`")
+            .with_hint("for strings/slices to pointers, use explicit indexing: `slice.[0].&`")
             .with_hint(format!("attempted to cast from `{}` to `{}`", from_str, to_str))
             .emit();
     }
@@ -1653,6 +1600,19 @@ impl<'a> ExprChecker<'a> {
         span: Span,
     ) -> TypeId {
         let exp_norm = self.strip_mut(expected);
+        let kind_enum = self.ctx.type_registry.get(exp_norm).clone();
+
+        // 拦截 Trait Object 构造
+        if let TypeKind::TraitObject(..) = kind_enum {
+            if let ast::DataLiteralKind::Scalar(inner) = kind {
+                return self.check_trait_object_init(inner, expected, exp_norm, span);
+            } else {
+                self.ctx.struct_error(span, "trait objects must be initialized with a single pointer")
+                    .with_hint("example: `Reader.{ file_ptr }`")
+                    .emit();
+                return TypeId::ERROR;
+            }
+        }
         let is_adt = matches!(self.ctx.type_registry.get(exp_norm), TypeKind::Adt(..));
 
         match kind {
@@ -1689,15 +1649,16 @@ impl<'a> ExprChecker<'a> {
         exp_norm: TypeId,
         span: Span,
     ) -> TypeId {
-        // 1. 动态剥离类型信息
+       // 1. 动态剥离类型信息
         let (exp_elem_ty, expected_len) = match self.ctx.type_registry.get(exp_norm) {
             TypeKind::Array { elem, len } => (*elem, Some(*len)),
-            TypeKind::ArrayInfer(elem) => (*elem, None), // 这是 [_]T 的情况
+            TypeKind::ArrayInfer(elem) => (*elem, None),
+            TypeKind::Slice(elem) => (*elem, None), 
             _ => {
-                // 如果既不是数组，也不是推导数组，报错退出
+                // 报错信息也可以顺便优化一下
                 let ty_str = self.ctx.ty_to_string(expected);
                 self.ctx
-                    .struct_error(span, "expected an array type for array literal `.{ ... }`")
+                    .struct_error(span, "expected an array or slice type for literal `.{ ... }`")
                     .with_hint(format!("context expects `{}`", ty_str))
                     .emit();
                 return TypeId::ERROR;
@@ -1757,12 +1718,13 @@ impl<'a> ExprChecker<'a> {
         let (exp_elem_ty, is_infer) = match self.ctx.type_registry.get(exp_norm) {
             TypeKind::Array { elem, .. } => (*elem, false),
             TypeKind::ArrayInfer(elem) => (*elem, true),
+            TypeKind::Slice(elem) => (*elem, true), 
             _ => {
                 let ty_str = self.ctx.ty_to_string(expected);
                 self.ctx
                     .struct_error(
                         span,
-                        "expected an array type for repeat literal `.{ v; N }`",
+                        "expected an array or slice type for repeat literal `.{ v; N }`",
                     )
                     .with_hint(format!("context expects `{}`", ty_str))
                     .emit();
@@ -2074,6 +2036,51 @@ impl<'a> ExprChecker<'a> {
                     format!("variant `{}` not found in ADT `{}`", v_str, adt_str),
                 )
                 .emit();
+        }
+
+        expected
+    }
+
+    /// 校验 Trait Object 构造 `Reader.{ ptr }`
+    fn check_trait_object_init(
+        &mut self,
+        inner: &Expr,
+        expected: TypeId,
+        exp_norm: TypeId,
+        span: Span,
+    ) -> TypeId {
+        let inner_ty = self.check_expr(inner, None);
+        if inner_ty == TypeId::ERROR {
+            return TypeId::ERROR;
+        }
+
+        let is_to_mut = self.is_mut_type(expected);
+        let is_inner_mut_ptr = self.is_mutable_pointer(inner_ty);
+
+        if is_to_mut && !is_inner_mut_ptr {
+            self.ctx.struct_error(span, "cannot construct a mutable trait object `mut Trait` from a read-only pointer")
+                .with_hint("ensure the source pointer is `*mut T`")
+                .emit();
+            return TypeId::ERROR;
+        }
+
+        let is_inner_ptr = matches!(
+            self.ctx.type_registry.get(self.strip_mut(inner_ty)),
+            TypeKind::Pointer(_) | TypeKind::VolatilePtr(_)
+        );
+
+        if !is_inner_ptr {
+            let inner_str = self.ctx.ty_to_string(inner_ty);
+            self.ctx.struct_error(inner.span, "trait objects can only be constructed from pointers")
+                .with_hint(format!("provided value is of type `{}`", inner_str))
+                .emit();
+            return TypeId::ERROR;
+        }
+
+        if !self.check_trait_impl(inner_ty, exp_norm) {
+            let trait_str = self.ctx.ty_to_string(exp_norm);
+            self.ctx.struct_error(span, format!("the provided pointer type does not implement trait `{}`", trait_str)).emit();
+            return TypeId::ERROR;
         }
 
         expected
