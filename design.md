@@ -9,11 +9,13 @@
    6. [Control Flow](#6-control-flow)
    7. [Modules](#7-modules)
    8. [Interoperability](#8-interoperability)
-
-**[Experimental Features (Unstable)](#experimental-features-unstable)**
-
    9. [Algebraic Data Types (ADT) and Pattern Matching](#9-algebraic-data-types-adt-and-pattern-matching)
    10. [Stateless Anonymous Functions (Lambdas)](#10-stateless-anonymous-functions-lambdas)
+
+**[Experimental Features (Unstable)](#experimental-features-unstable)** 
+    
+   11. [Inline Assembly (`@asm`)](#11-inline-assembly-asm)
+   12. [AST Attributes and Metadata (#[...])](#12-ast-attributes-and-metadata-)
 ---
 
 ## 1. Core Philosophy and Manifesto
@@ -423,10 +425,6 @@ extern {
 
 ```
 
-## Experimental Features (Unstable)
-
-> **Notice**: The features described in this document are currently experimental. They are undergoing semantic evaluation and compiler implementation, and are not yet stabilized as part of the core Kern specification. The syntax and underlying memory models of these features are subject to change in future iterations.
-
 ## 9. Algebraic Data Types (ADT) and Pattern Matching
 
 To provide robust state management and error handling without introducing exceptions or implicit control flow, Kern introduces Algebraic Data Types (`adt`).
@@ -518,8 +516,6 @@ arr.sort(fn(a: i32, b: i32) bool {
 
 ```
 
-*Note: If state capture is required, developers must explicitly define a `class` (Thick Object) to manage the memory of the captured variables.*
-
 ### 10.2 Interaction with Traits (Default Implementations)
 
 Anonymous functions act as the mechanism for providing default implementations for `trait` methods. Since a `trait` is logically a template for a VTable, providing a default method is semantically identical to providing a default value for a struct field.
@@ -543,3 +539,104 @@ type Shape = trait {
 **Interactions and Edge Cases**:
 
 * **Implicit `self` Injection**: When an anonymous function is used as the default value for a `trait` field, the compiler's semantic analyzer (Sema) implicitly injects the `self` context into the anonymous function's scope. This allows the default method to call other trait methods (like `self.id()` in the example above) while maintaining the explicit symmetry of the trait declaration syntax.
+
+## Experimental Features (Unstable)
+
+> **Notice**: The features described below are currently experimental. They are scheduled for inclusion in the `0.3.x` and `0.4.x` compiler iterations. The syntax and semantic analysis (Sema) rules are under active development and may be subject to minor adjustments before stabilization.
+
+## 11. Inline Assembly (`@asm`)
+
+To fulfill its role as a systems-level language, Kern provides direct access to hardware via the `@asm` intrinsic. To maintain Kern's philosophy of "explicit over implicit", inline assembly does not use format strings with hidden index bindings. Instead, it leverages Kern's elided struct literal syntax (`.{ ... }`) to create a strict, named mapping between CPU registers and Kern variables.
+
+### 11.1 Syntax and Register Binding
+
+The `@asm` intrinsic takes a single argument: an anonymous configuration object containing the assembly template, register bindings, and compiler directives.
+
+* `asm`: The raw assembly string.
+* `outputs`: A mapping of CPU registers to Kern **mutable pointers** (`*mut T`).
+* `inputs`: A mapping of CPU registers to Kern scalar values.
+* `clobbers`: A list of strings indicating states or registers destroyed by the assembly (e.g., `"memory"`).
+* `volatile`: A boolean indicating whether the optimizer should preserve this assembly block even if its outputs appear unused.
+
+```kern
+pub fn outb_and_read(port: u16, data: u8) u8 {
+    let status = mut u8.{undef};
+
+    @asm(.{
+        asm: "out dx, al \n in al, dx",
+        outputs: .{
+            al: status.&      // Binds the 'al' register to the mutable pointer of 'status'
+        },
+        inputs: .{
+            dx: port,         // Injects 'port' into the 'dx' register
+            al: data          // Injects 'data' into the 'al' register
+        },
+        clobbers: .{ "memory" }, // Informs the compiler that memory state was altered
+        volatile: true        // Prevents the optimizer from reordering or deleting
+    });
+
+    return status;
+}
+
+```
+
+## 12. AST Attributes and Metadata (`#[...]`)
+
+Kern completely rejects traditional C-style preprocessor macros. Instead, it introduces an **Attribute Mini-Language** to handle conditional compilation and AST node metadata injection.
+
+### 12.1 The Boolean Evaluator Model
+
+The core rule of Kern's attribute system is that the content inside `#[...]` is always evaluated as a **boolean expression with potential side effects**.
+
+* **Condition Pruning**: If the expression evaluates to `false`, the immediately following AST node is completely pruned from the compilation process.
+* **Short-circuiting**: The evaluator supports logical operators (`and`, `or`, `not`) and strictly short-circuits.
+* **Metadata Functions**: Built-in attribute functions (like `export_name`) always evaluate to `true` but carry the *side effect* of attaching metadata to the AST node.
+
+### 12.2 Examples and Idioms
+
+External environment variables (like target OS or architecture) are injected via the compiler CLI (e.g., `kernc -D os="windows"`).
+
+```kern
+// 1. Pure Conditional Compilation
+#[os == "linux" or os == "macos"]
+pub fn unix_syscall() { ... }
+
+// 2. Metadata Injection (Evaluates to true, attaches metadata)
+#[export_name("_start") and cold]
+pub fn kernel_entry() { ... }
+
+// 3. Combined Logic with Short-circuiting
+// If 'os' is not "windows", the evaluation stops, and the node is pruned.
+// The 'export_name' side effect will NEVER execute on Linux.
+#[os == "windows" and cold and export_name("NtCreateFile")]
+pub fn create_file_win() { ... }
+
+```
+
+### 12.3 Built-in Attributes
+
+* **Linkage**: `export_name(String)`, `link_section(String)`.
+* **Layout**: `packed`, `align(Integer)`.
+* **Optimization**: `cold`, `inline(always)`, `inline(never)`.
+* **Diagnostic**: `deprecated(String)`, `allow(String)`.
+
+## 13. Compiler Intrinsics (`@...`)
+
+Intrinsics are special functions implemented directly within the Kern compiler backend (e.g., LLVM). They are prefixed with `@` to strictly separate them from user-defined functions and prevent namespace pollution. Intrinsics are used for operations that cannot be safely or efficiently expressed in pure Kern code.
+
+### 13.1 Type Information and Casts
+
+* `@sizeof[T]() -> usize`: Evaluates to the memory footprint of type `T` at compile time.
+* `@intCast[T: Integer, U: Integer](val: T) -> U`: Performs bit-width truncation or zero/sign-extension between integer types.
+* `@intToFloat[T: Integer, U: Float](val: T) -> U`: Converts an integer representation to a floating-point representation.
+* `@floatCast[T: Float, U: Float](val: T) -> U`: Converts between different floating-point precisions.
+* `@floatToInt[T: Float, U: Integer](val: T) -> U`: Truncates a floating-point value into an integer.
+
+### 13.2 Hardware and Bit Manipulation (Planned)
+
+* `@popcount(val)`: Returns the number of 1-bits in the value.
+* `@clz(val)` / `@ctz(val)`: Counts leading/trailing zeros. Highly optimized for page table and bitmap management.
+
+### 13.3 Control Flow Optimization (Planned)
+
+* `@unreachable() -> !`: Informs the compiler optimizer that a specific code path is physically impossible to reach. Often used within exhaustive `match` blocks handling hardware constraints to eliminate dead assembly branches.

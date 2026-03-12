@@ -1,7 +1,0 @@
-// 相对路径导入，并使用 pub use 重新导出（Re-export）给外部
-pub use .geometry.{ Point, new_point };
-
-// math 模块自身的公共函数
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
