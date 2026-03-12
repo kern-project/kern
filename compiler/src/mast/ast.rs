@@ -159,7 +159,12 @@ pub enum MastExprKind {
         else_branch: Option<MastBlock>,
     },
 
-    Loop(MastBlock),
+    /// 包含循环体和一个专门的 Latch (锁存) 块，用于执行 `i += 1` 等 post 语句。
+    /// 遇到 continue 时，会直接跳转到 latch 块执行，然后再判断是否进入下一轮。
+    Loop {
+        body: MastBlock,
+        latch: Option<MastBlock>, // 对应 for 循环的 post 语句
+    },
 
     /// Switch 被保留，因为 LLVM 有原生的 `switch` 指令，比 if-else 链快得多。
     Switch {
@@ -244,5 +249,4 @@ pub enum MastCastKind {
     FloatToInt,   // 浮点数转整数
     FloatCast,    // 浮点数精度转换 (f32 <=> f64)
     ArrayToSlice, // 隐式降级：构造切片胖指针
-    SliceToPtr,
 }
