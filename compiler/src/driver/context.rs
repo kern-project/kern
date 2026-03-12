@@ -1,5 +1,6 @@
 #![allow(unused)]
 use super::config::TargetMachine;
+use super::CompileOptions;
 use super::diagnostic::{Diagnostic, DiagnosticLevel};
 use crate::parser::ast::NodeId;
 use crate::sema::*;
@@ -17,6 +18,7 @@ pub struct Context {
     pub scopes: scope::SymbolTable,
     pub node_types: HashMap<NodeId, ty::TypeId>,
     pub target: TargetMachine,
+    pub custom_defines: HashMap<String, String>,
     pub next_node_id: u32,
 }
 
@@ -32,8 +34,15 @@ impl Context {
             scopes: scope::SymbolTable::new(),
             node_types: HashMap::new(),
             target: TargetMachine::default(),
+            custom_defines: HashMap::new(),
             next_node_id: 0,
         }
+    }
+
+    /// 便捷方法：将 Context 配置与命令行参数同步
+    pub fn apply_options(&mut self, options: &CompileOptions) {
+        self.target = options.target.clone();
+        self.custom_defines = options.custom_defines.clone();
     }
 
     pub fn next_node_id(&mut self) -> NodeId {

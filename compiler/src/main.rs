@@ -1,5 +1,5 @@
 use kernc::driver::CompilerDriver;
-use kernc::driver::config::{CompileOptions, OptLevel, TargetMachine};
+use kernc::driver::config::{CompileOptions, OptLevel, TargetMachine, AsmDialect};
 use std::env;
 use std::process;
 
@@ -10,6 +10,7 @@ fn print_usage(program_name: &str) {
     println!("  -O0, -O1, -O2, -O3  Set optimization level");
     println!("  --emit-llvm    Print LLVM IR to stdout");
     println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
+    println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)"); 
     println!("  -v, --version  Display version information and exit");
     println!("  -h, --help     Display this help and exit");
 }
@@ -51,6 +52,20 @@ fn parse_args() -> CompileOptions {
                     eprintln!("Error: Invalid target triple: {}", e);
                     process::exit(1);
                 });
+            }
+            "--asm-dialect" => {
+                let dialect_str = args.next().unwrap_or_else(|| {
+                    eprintln!("Error: Expected dialect after `--asm-dialect`");
+                    process::exit(1);
+                });
+                options.asm_dialect = match dialect_str.as_str() {
+                    "intel" => AsmDialect::Intel,
+                    "att" => AsmDialect::Att,
+                    _ => {
+                        eprintln!("Error: Invalid asm dialect `{}`. Expected `intel` or `att`.", dialect_str);
+                        process::exit(1);
+                    }
+                };
             }
             _ => {
                 if arg.starts_with('-') {

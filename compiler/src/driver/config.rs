@@ -1,6 +1,7 @@
 // src/config.rs
 use std::str::FromStr;
 use target_lexicon::{PointerWidth, Triple};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptLevel {
@@ -52,6 +53,18 @@ impl Default for TargetMachine {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsmDialect {
+    Intel,
+    Att,
+}
+
+impl Default for AsmDialect {
+    fn default() -> Self {
+        AsmDialect::Intel // 默认使用 Intel，也可以改成 Att
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
     pub input_file: String,
@@ -59,6 +72,9 @@ pub struct CompileOptions {
     pub target: TargetMachine,
     pub opt_level: OptLevel,
     pub emit_llvm_ir: bool,
+    /// 允许通过 CLI 传入自定义环境变量，例如 kernc -D my_feature=true
+    pub custom_defines: HashMap<String, String>,
+    pub asm_dialect: AsmDialect,
 }
 
 impl Default for CompileOptions {
@@ -69,6 +85,8 @@ impl Default for CompileOptions {
             target: TargetMachine::default(),
             opt_level: OptLevel::O0,
             emit_llvm_ir: false,
+            custom_defines: HashMap::new(),
+            asm_dialect: AsmDialect::default(),
         }
     }
 }
