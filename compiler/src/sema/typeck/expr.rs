@@ -114,8 +114,12 @@ impl<'a> ExprChecker<'a> {
                 body,
             } => self.check_for(init.as_deref(), cond.as_deref(), post.as_deref(), body),
             ExprKind::Defer { expr: defer_expr } => self.check_defer(defer_expr),
-            ExprKind::Break | ExprKind::Continue => TypeId::VOID,
-            ExprKind::Return(val) => self.check_return(val.as_deref(), expr.span),
+            // Break, Continue, Return 会导致控制流发散，类型应为 NEVER
+            ExprKind::Break | ExprKind::Continue => TypeId::NEVER,
+            ExprKind::Return(val) => {
+                self.check_return(val.as_deref(), expr.span);
+                TypeId::NEVER
+            }
 
             // === 10. 泛型实例化 ===
             ExprKind::GenericInstantiation { target, types } => {
@@ -438,6 +442,14 @@ impl<'a> ExprChecker<'a> {
         let then_ty = self.check_expr(then_branch, expected_ty);
         if let Some(else_expr) = else_branch {
             let else_ty = self.check_expr(else_expr, expected_ty);
+            
+            // 如果有一边发散(NEVER)，类型以另一边为准
+            if then_ty == TypeId::NEVER {
+                return else_ty;
+            } else if else_ty == TypeId::NEVER {
+                return then_ty;
+            }
+
             self.check_coercion(else_expr.span, then_ty, else_ty);
             then_ty
         } else {
@@ -472,18 +484,18 @@ impl<'a> ExprChecker<'a> {
                 }
             }
             let body_ty = self.check_expr(&case.body, common_ret_ty);
-            if common_ret_ty.is_none() {
+            if common_ret_ty.is_none() || common_ret_ty == Some(TypeId::NEVER) {
                 common_ret_ty = Some(body_ty);
-            } else {
+            } else if body_ty != TypeId::NEVER {
                 self.check_coercion(case.body.span, common_ret_ty.unwrap(), body_ty);
             }
         }
 
         if let Some(def) = default_case {
             let def_ty = self.check_expr(def, common_ret_ty);
-            if common_ret_ty.is_none() {
+            if common_ret_ty.is_none() || common_ret_ty == Some(TypeId::NEVER) {
                 common_ret_ty = Some(def_ty);
-            } else {
+            } else if def_ty != TypeId::NEVER {
                 self.check_coercion(def.span, common_ret_ty.unwrap(), def_ty);
             }
         }
@@ -565,9 +577,11 @@ impl<'a> ExprChecker<'a> {
             }
         }
 
-        let (def_id, _old_args) = match self.ctx.type_registry.get(target_norm) {
+        let (def_id, _) = match self.ctx.type_registry.get(target_norm) {
             TypeKind::FnDef(id, args) => (*id, args.clone()),
             TypeKind::Def(id, args) => (*id, args.clone()),
+            TypeKind::Adt(id, args) => (*id, args.clone()),
+            TypeKind::TraitObject(id, args) => (*id, args.clone()),
             _ => {
                 self.ctx
                     .struct_error(
@@ -924,6 +938,10 @@ impl<'a> ExprChecker<'a> {
         if exp == act || exp == TypeId::ERROR || act == TypeId::ERROR {
             return true;
         }
+        // Never 类型（如 return, panic）可以作为任何期望类型的合法占位符
+        if act == TypeId::NEVER {
+            return true;
+        }
 
         let exp_kind = self.ctx.type_registry.get(exp).clone();
         let act_kind = self.ctx.type_registry.get(act).clone();
@@ -1032,7 +1050,6 @@ impl<'a> ExprChecker<'a> {
         let f_norm = self.strip_mut(from);
         let t_norm = self.strip_mut(to);
 
-        // === 纯粹的 Bit-Pattern 强转 ===
         let is_f_int = self.ctx.type_registry.is_integer(f_norm);
         let is_t_int = self.ctx.type_registry.is_integer(t_norm);
         let is_f_ptr = matches!(
@@ -1044,19 +1061,33 @@ impl<'a> ExprChecker<'a> {
             TypeKind::Pointer(_) | TypeKind::VolatilePtr(_)
         );
 
-        if (is_f_int && is_t_int)
-            || (is_f_ptr && is_t_ptr)
-            || (is_f_int && is_t_ptr)
-            || (is_f_ptr && is_t_int)
-        {
-            return; // 允许的转换
+        // 1. 允许指针视角转换 (例如 *i32 as *u8)
+        if is_f_ptr && is_t_ptr {
+            return; 
         }
 
+        // 2. 允许指针和 usize 互转 (用于底层地址算术和 0 as *T)
+        // 在 Kern 中，字面量 0 默认推导为 usize，所以 `0 as *i32` 是完全合法的
+        if (is_f_ptr && t_norm == TypeId::USIZE) || (f_norm == TypeId::USIZE && is_t_ptr) {
+            return; 
+        }
+
+        // 3. 严禁纯数字之间的 as 转换
+        if is_f_int && is_t_int {
+            let from_str = self.ctx.ty_to_string(from);
+            let to_str = self.ctx.ty_to_string(to);
+            self.ctx.struct_error(span, "numeric casting via `as` is forbidden to prevent implicit truncation or extension")
+                .with_hint(format!("use `@intCast[{}, {}](val)` for explicit integer conversions", from_str, to_str))
+                .emit();
+            return;
+        }
+
+        // 4. 兜底报错
         let from_str = self.ctx.ty_to_string(from);
         let to_str = self.ctx.ty_to_string(to);
         self.ctx.struct_error(span, "invalid `as` cast")
-            .with_hint("`as` is strictly limited to primitive bit-pattern casts (e.g., int to ptr, i32 to u32)")
-            .with_hint("for trait objects, use constructor syntax: `Trait.{ ptr }`")
+            .with_hint("`as` is strictly limited to pointer casts and pointer-to-usize conversions")
+            .with_hint("for trait objects, use explicit constructor syntax: `Trait.{ ptr }`")
             .with_hint("for strings/slices to pointers, use explicit indexing: `slice.[0].&`")
             .with_hint(format!("attempted to cast from `{}` to `{}`", from_str, to_str))
             .emit();
@@ -2161,7 +2192,7 @@ impl<'a> ExprChecker<'a> {
         let mut has_catch_all = false;
 
         for arm in arms {
-            // 🌟 护城河：为每个匹配分支开启独立的作用域，避免解包变量跨分支污染
+            // 为每个匹配分支开启独立的作用域，避免解包变量跨分支污染
             self.ctx.scopes.enter_scope();
 
             match &arm.pattern {

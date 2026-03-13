@@ -142,6 +142,9 @@ pub enum TypeKind {
         len: Box<Expr>, // 必须是常量表达式
     },
 
+    // 长度推导数组: `[_]T` (用于 .{ 1, 2, 3 } 赋值时的类型推导)
+    ArrayInfer(Box<TypeNode>),
+
     /// 切片: `[]T`
     Slice { elem: Box<TypeNode> },
 
@@ -180,6 +183,9 @@ pub enum TypeKind {
 
     /// 代表当前 impl 块的目标类型
     SelfType,
+
+    /// Never 类型 `!`，代表永远不会返回的控制流
+    Never,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -276,7 +282,6 @@ pub enum ExprKind {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
-
     // --- Constructors ---
     /// 统一的数据字面量初始化，支持 Type.{ ... } 和 .{ ... }
     DataInit {

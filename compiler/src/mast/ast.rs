@@ -27,6 +27,7 @@ pub struct MastStruct {
     pub is_extern: bool, // 用于对接 C 的 struct
     pub is_union: bool,
     pub largest_field_idx: usize,
+    pub attributes: Vec<crate::parser::ast::MetaItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +44,7 @@ pub struct MastGlobal {
     pub is_mut: bool,           // 对应 static mut
     pub init: Option<MastExpr>, // extern 的时候为 None。初始化必须是常量表达式。
     pub is_extern: bool,
+    pub attributes: Vec<crate::parser::ast::MetaItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +56,7 @@ pub struct MastFunction {
     pub body: Option<MastBlock>, // extern 时为 None
     pub is_extern: bool,
     pub is_variadic: bool,
+    pub attributes: Vec<crate::parser::ast::MetaItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +128,7 @@ impl MastExpr {
 pub enum MastExprKind {
     // --- 1. 基本字面量 ---
     Undef,
+    Unreachable,
     Integer(u128),
     Float(f64),
     Bool(bool),

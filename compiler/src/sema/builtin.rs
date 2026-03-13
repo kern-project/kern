@@ -49,6 +49,7 @@ impl<'a> BuiltinInjector<'a> {
         self.inject_float_cast(float_trait_id);
         self.inject_int_cast(int_trait_id);
         self.inject_float_to_int(float_trait_id, int_trait_id);
+        self.inject_unreachable();
     }
 
     // ==========================================
@@ -170,6 +171,7 @@ impl<'a> BuiltinInjector<'a> {
             is_intrinsic: true,
             resolved_sig: Some(sig_ty),
             span: Default::default(),
+            attributes: vec![],
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -273,6 +275,7 @@ impl<'a> BuiltinInjector<'a> {
             is_intrinsic: true,
             resolved_sig: Some(sig_ty),
             span: Default::default(),
+            attributes: vec![],
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -375,6 +378,7 @@ impl<'a> BuiltinInjector<'a> {
             is_intrinsic: true, // 关键标记，后端会特殊处理
             resolved_sig: Some(sig_ty),
             span: Default::default(),
+            attributes: vec![],
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -472,6 +476,7 @@ impl<'a> BuiltinInjector<'a> {
             is_intrinsic: true,
             resolved_sig: Some(sig_ty),
             span: Default::default(),
+            attributes: vec![],
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -574,6 +579,7 @@ impl<'a> BuiltinInjector<'a> {
             is_intrinsic: true,
             resolved_sig: Some(sig_ty),
             span: Default::default(),
+            attributes: vec![],
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -586,6 +592,56 @@ impl<'a> BuiltinInjector<'a> {
                 .ctx
                 .type_registry
                 .intern(TypeKind::FnDef(def_id, vec![])),
+            def_id: Some(def_id),
+            span: Default::default(),
+            is_pub: true,
+        };
+        let _ = self.ctx.scopes.define(name_id, info);
+    }
+
+    // 注入 @unreachable() -> !
+    fn inject_unreachable(&mut self) {
+        let name_id = self.ctx.intern("@unreachable");
+        let def_id = DefId(self.ctx.defs.len() as u32);
+
+        let ret_id = self.ctx.next_node_id();
+        let sig_ty = {
+            self.ctx.node_types.insert(ret_id, TypeId::NEVER);
+            self.ctx.type_registry.intern(TypeKind::Function {
+                params: vec![],
+                ret: TypeId::NEVER,
+                is_variadic: false,
+            })
+        };
+
+        let func_def = FunctionDef {
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
+            generics: vec![],
+            params: vec![],
+            ret_type: TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast::TypeKind::Never, // 直接映射到 Never 类型
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
+            attributes: vec![],
+        };
+
+        self.ctx.add_def(Def::Function(func_def));
+        let root_scope = crate::sema::scope::ScopeId(0);
+        self.ctx.scopes.set_current_scope(root_scope);
+        let info = SymbolInfo {
+            kind: SymbolKind::Function,
+            node_id: self.ctx.next_node_id(),
+            type_id: self.ctx.type_registry.intern(TypeKind::FnDef(def_id, vec![])),
             def_id: Some(def_id),
             span: Default::default(),
             is_pub: true,

@@ -28,6 +28,12 @@ pub struct Lowerer<'a> {
 
     // 维护降级时的局部变量类型栈
     pub local_types: Vec<HashMap<SymbolId, TypeId>>,
+
+    // 记录进入循环时 defer_stack 的深度
+    loop_frames: Vec<usize>,
+
+    // 专门记录 ADT Wrapper ID -> Payload Union ID 的安全映射
+    adt_union_map: HashMap<MonoId, MonoId>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -46,6 +52,8 @@ impl<'a> Lowerer<'a> {
             global_map: HashMap::new(),
             vtable_cache: HashMap::new(),
             local_types: Vec::new(),
+            loop_frames: Vec::new(),
+            adt_union_map: HashMap::new(),
         }
     }
 
@@ -74,6 +82,10 @@ impl<'a> Lowerer<'a> {
             let def = self.ctx.defs[id.0 as usize].clone();
             match def {
                 Def::Function(f) => {
+                    // 内置函数没有物理实体，直接跳过，不进入 MAST
+                    if f.is_intrinsic {
+                        continue;
+                    }
                     // 检查函数自身和其父级（Impl块）是否包含泛型
                     // 只有自己没泛型，且爹也没泛型的函数，才是真正的“自由函数”，才能在此刻被实例化
                     let mut is_generic = !f.generics.is_empty();
@@ -191,6 +203,7 @@ impl<'a> Lowerer<'a> {
             body,
             is_extern: def.is_extern,
             is_variadic: def.is_variadic,
+            attributes: self.extract_meta_items(&def.attributes),
         };
 
         self.module.functions.push(mast_fn);
@@ -248,6 +261,7 @@ impl<'a> Lowerer<'a> {
             is_extern: def.is_extern,
             is_union: false,
             largest_field_idx: 0,
+            attributes: self.extract_meta_items(&def.attributes),
         });
         id
     }
@@ -309,6 +323,7 @@ impl<'a> Lowerer<'a> {
             is_extern: false,
             is_union: true,
             largest_field_idx,
+            attributes: vec![],
         });
         id
     }
@@ -322,6 +337,7 @@ impl<'a> Lowerer<'a> {
         let wrapper_id = self.new_mono_id();
         let payload_union_id = self.new_mono_id();
         self.mono_cache.insert(key, wrapper_id);
+        self.adt_union_map.insert(wrapper_id, payload_union_id);
 
         let def = if let Def::Adt(a) = &self.ctx.defs[def_id.0 as usize] {
             a.clone()
@@ -386,6 +402,7 @@ impl<'a> Lowerer<'a> {
             is_extern: false,
             is_union: true,
             largest_field_idx: largest_idx,
+            attributes: vec![],
         });
 
         // 2. 构建外部的 Wrapper Struct (Tag + Union)
@@ -412,6 +429,7 @@ impl<'a> Lowerer<'a> {
             is_extern: false,
             is_union: false,
             largest_field_idx: 0,
+            attributes: vec![],
         });
 
         wrapper_id
@@ -449,6 +467,7 @@ impl<'a> Lowerer<'a> {
             is_mut,
             init,
             is_extern: g.is_extern,
+            attributes: self.extract_meta_items(&g.attributes),
         });
     }
 
@@ -589,6 +608,7 @@ impl<'a> Lowerer<'a> {
             body: Some(body_block),
             is_extern: false,
             is_variadic: false,
+            attributes: vec![],
         };
 
         // 强势插入到模块的顶层函数列表中
@@ -682,8 +702,8 @@ impl<'a> Lowerer<'a> {
 
             ExprKind::Call { callee, args } => self.lower_call(callee, args, subst_map, expr.span),
             ExprKind::FieldAccess { lhs, field } => {
-                // [FIX 2]: 通过 AST 节点的推导类型直接判断是否是静态函数
-                // 完美解决跨模块调用时，Scope 丢失导致的误判问题
+                // 通过 AST 节点的推导类型直接判断是否是静态函数
+                // 解决跨模块调用时，Scope 丢失导致的误判问题
                 let expr_ty = self
                     .ctx
                     .node_types
@@ -754,8 +774,8 @@ impl<'a> Lowerer<'a> {
             ExprKind::GenericInstantiation { .. } => self.lower_generic_instantiation(concrete_ty),
 
             ExprKind::SelfValue => MastExprKind::Var(self.ctx.intern("self")),
-            ExprKind::Break => MastExprKind::Break,
-            ExprKind::Continue => MastExprKind::Continue,
+            ExprKind::Break => self.lower_jump(MastExprKind::Break, expr.span),
+            ExprKind::Continue => self.lower_jump(MastExprKind::Continue, expr.span),
             ExprKind::Undef => MastExprKind::Undef,
 
             ExprKind::SliceOp { .. } => {
@@ -820,6 +840,7 @@ impl<'a> Lowerer<'a> {
                 span,
             )),
             is_extern: false,
+            attributes: vec![],
         });
 
         let data_ptr = MastExpr::new(
@@ -885,6 +906,7 @@ impl<'a> Lowerer<'a> {
             is_mut,
             init: Some(lower_init),
             is_extern: false,
+            attributes: vec![],
         });
         MastExprKind::GlobalRef(global_id)
     }
@@ -1431,6 +1453,10 @@ impl<'a> Lowerer<'a> {
                             operand: Box::new(arg_masts.remove(0)),
                         };
                     }
+                    // 6. 不可达: @unreachable() -> !
+                    else if name_str == "@unreachable" {
+                        return MastExprKind::Unreachable;
+                    }
                 }
             }
 
@@ -1893,8 +1919,12 @@ impl<'a> Lowerer<'a> {
             )));
         }
 
+        // 记录进入循环体前 defer_stack 的高度
+        self.loop_frames.push(self.defer_stack.len());
         // 仅仅降级循环体，不包含 post
         loop_stmts.push(MastStmt::Expr(self.lower_expr(body, subst_map, None)));
+        // 退出循环体，弹出边界
+        self.loop_frames.pop();
 
         let body_block = MastBlock {
             stmts: loop_stmts,
@@ -2084,12 +2114,14 @@ impl<'a> Lowerer<'a> {
                         );
 
                         // 再从 Union 中通过字段索引提取具体的 Payload
-                        // 注意：Union的 MonoId 就是 `mono_id.0 + 1`，因为我们是连续分配的。
+                        let target_union_id = *self.adt_union_map.get(&mono_id)
+                            .expect("Kern ICE: Missing ADT to Union mapping");
+
                         let payload_extract = MastExpr::new(
                             conc_payload_ty,
                             MastExprKind::FieldAccess {
                                 lhs: Box::new(union_access),
-                                struct_id: MonoId(mono_id.0 + 1), // 指向 payload_union_id
+                                struct_id: target_union_id, 
                                 field_idx: tag_idx,
                             },
                             arm.span,
@@ -2155,6 +2187,37 @@ impl<'a> Lowerer<'a> {
             defer_stmts.push(MastStmt::Expr(MastExpr::new(
                 TypeId::VOID,
                 MastExprKind::Return(v),
+                span,
+            )));
+            MastExprKind::Block(MastBlock {
+                stmts: defer_stmts,
+                result: None,
+                defers: vec![],
+            })
+        }
+    }
+
+    /// 专门处理 Break 和 Continue 的 Defer 展开
+    fn lower_jump(&mut self, jump_kind: MastExprKind, span: Span) -> MastExprKind {
+        let mut defer_stmts = Vec::new();
+        
+        // 获取当前所属循环的起始栈深度
+        let boundary = *self.loop_frames.last().expect("Kern Sema failed to catch jump outside of loop");
+
+        // 从当前栈顶一路向下倒序提取 defer，直到达到循环的边界
+        for stack in self.defer_stack[boundary..].iter().rev() {
+            for d in stack.iter().rev() {
+                defer_stmts.push(MastStmt::Expr(d.clone()));
+            }
+        }
+
+        if defer_stmts.is_empty() {
+            jump_kind
+        } else {
+            // 将实际的跳转指令放在所有清理工作之后
+            defer_stmts.push(MastStmt::Expr(MastExpr::new(
+                TypeId::NEVER,
+                jump_kind,
                 span,
             )));
             MastExprKind::Block(MastBlock {
@@ -2535,6 +2598,17 @@ impl<'a> Lowerer<'a> {
             is_mut: false, // 虚表永远是静态不可变的只读数据
             init: Some(vtable_init),
             is_extern: false,
+            attributes: vec![],
         });
+    }
+
+    fn extract_meta_items(&self, attrs: &[ast::Attribute]) -> Vec<ast::MetaItem> {
+        let mut meta = Vec::new();
+        for attr in attrs {
+            if let ast::AttributeKind::Meta(items) = &attr.kind {
+                meta.extend(items.clone());
+            }
+        }
+        meta
     }
 }
