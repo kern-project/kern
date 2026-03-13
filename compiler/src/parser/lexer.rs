@@ -22,7 +22,7 @@ impl<'a> Lexer<'a> {
 
     /// 获取下一个 Token
     pub fn next(&mut self) -> Token {
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         self.start = self.current;
 
@@ -32,19 +32,11 @@ impl<'a> Lexer<'a> {
         };
 
         match c {
-            // 标识符或关键字 (a-z, A-Z, _)
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.scan_identifier(),
-
-            // 数字 (0-9)
             b'0'..=b'9' => self.scan_number(),
-
-            // 字符串
             b'"' => self.scan_string(),
-
-            // 字符
             b'\'' => self.scan_char(),
 
-            // 运算符和标点
             b'(' => self.make_token(TokenType::LParen),
             b')' => self.make_token(TokenType::RParen),
             b'{' => self.make_token(TokenType::LBrace),
@@ -57,121 +49,58 @@ impl<'a> Lexer<'a> {
             b'#' => self.make_token(TokenType::Hash),
             b'@' => self.make_token(TokenType::At),
 
-            // Dot 家族处理
             b'.' => {
-                // 1. 检查 .. 开头的情况
                 if self.match_char(b'.') {
-                    // 检查是否是 ... (变长参数)
-                    if self.match_char(b'.') {
-                        return self.make_token(TokenType::Ellipsis);
-                    }
-                    // 检查是否是 ..= (闭区间范围)
-                    else if self.match_char(b'=') {
-                        return self.make_token(TokenType::DotDotEqual);
-                    }
-                    // 否则就是普通的 .. (半开范围)
+                    if self.match_char(b'.') { return self.make_token(TokenType::Ellipsis); }
+                    else if self.match_char(b'=') { return self.make_token(TokenType::DotDotEqual); }
                     return self.make_token(TokenType::DotDot);
                 }
-                // 2. 检查 .* (指针解引用)
-                else if self.match_char(b'*') {
-                    return self.make_token(TokenType::DotStar);
-                }
-                // 3. 检查 .& (取地址)
-                else if self.match_char(b'&') {
-                    return self.make_token(TokenType::DotAmpersand);
-                }
-                // 4. 检查 .[ (切片/数组索引)
-                else if self.match_char(b'[') {
-                    return self.make_token(TokenType::DotLBracket);
-                }
-                // 5. 检查 .{ (匿名初始化)
-                else if self.match_char(b'{') {
-                    return self.make_token(TokenType::DotLBrace);
-                }
-                // 6. 普通点 . (字段访问)
-                else {
-                    return self.make_token(TokenType::Dot);
-                }
+                else if self.match_char(b'*') { return self.make_token(TokenType::DotStar); }
+                else if self.match_char(b'&') { return self.make_token(TokenType::DotAmpersand); }
+                else if self.match_char(b'[') { return self.make_token(TokenType::DotLBracket); }
+                else if self.match_char(b'{') { return self.make_token(TokenType::DotLBrace); }
+                else { return self.make_token(TokenType::Dot); }
             }
 
             b'+' => self.match_assign(TokenType::Plus, TokenType::PlusAssign),
             b'-' => self.match_assign(TokenType::Minus, TokenType::MinusAssign),
             b'*' => self.match_assign(TokenType::Star, TokenType::StarAssign),
             b'%' => self.match_assign(TokenType::Percent, TokenType::PercentAssign),
+
             b'/' => {
-                // 1. 检查是否是单行注释 //
-                if self.match_char(b'/') {
-                    self.skip_comment_line();
-                    self.next() // 递归调用，寻找下一个有效 Token
-                }
-                // 2. 检查是否是多行注释 /*
-                else if self.match_char(b'*') {
-                    // 进入这里时，已经消耗了 "/*"
-                    if !self.skip_comment_block() {
-                        return self.make_token(TokenType::Illegal);
-                    }
-                    self.next() // 递归调用
-                }
-                // 3. 检查是否是除法赋值 /=
-                else if self.match_char(b'=') {
+                if self.match_char(b'=') {
                     self.make_token(TokenType::SlashAssign)
-                }
-                // 4. 普通除号 /
-                else {
+                } else {
                     self.make_token(TokenType::Slash)
                 }
             }
 
             b'=' => {
-                if self.match_char(b'=') {
-                    self.make_token(TokenType::EqualEqual)
-                } else if self.match_char(b'>') {
-                    self.make_token(TokenType::Arrow)
-                } else {
-                    self.make_token(TokenType::Assign)
-                }
+                if self.match_char(b'=') { self.make_token(TokenType::EqualEqual) } 
+                else if self.match_char(b'>') { self.make_token(TokenType::Arrow) } 
+                else { self.make_token(TokenType::Assign) }
             }
             b'!' => {
-                if self.match_char(b'=') {
-                    self.make_token(TokenType::NotEqual)
-                } else {
-                    self.make_token(TokenType::Bang)
-                }
+                if self.match_char(b'=') { self.make_token(TokenType::NotEqual) } 
+                else { self.make_token(TokenType::Bang) }
             }
             b'<' => {
-                // 检查是否是左移 <<
                 if self.match_char(b'<') {
-                    // 检查是否是左移赋值 <<=
-                    if self.match_char(b'=') {
-                        return self.make_token(TokenType::LShiftAssign);
-                    }
+                    if self.match_char(b'=') { return self.make_token(TokenType::LShiftAssign); }
                     return self.make_token(TokenType::LShift);
                 }
-                // 检查是否是小于等于 <=
-                if self.match_char(b'=') {
-                    return self.make_token(TokenType::LessEqual);
-                }
-                // 否则就是小于 <
+                if self.match_char(b'=') { return self.make_token(TokenType::LessEqual); }
                 self.make_token(TokenType::LessThan)
             }
             b'>' => {
-                // 检查是否是右移 >>
                 if self.match_char(b'>') {
-                    // 检查是否是右移赋值 >>=
-                    if self.match_char(b'=') {
-                        return self.make_token(TokenType::RShiftAssign);
-                    }
+                    if self.match_char(b'=') { return self.make_token(TokenType::RShiftAssign); }
                     return self.make_token(TokenType::RShift);
                 }
-                // 检查是否是大于等于 >=
-                if self.match_char(b'=') {
-                    return self.make_token(TokenType::GreaterEqual);
-                }
-                // 否则就是大于 >
+                if self.match_char(b'=') { return self.make_token(TokenType::GreaterEqual); }
                 self.make_token(TokenType::GreaterThan)
             }
 
-            // 位运算
             b'&' => self.match_assign(TokenType::Ampersand, TokenType::AmpersandAssign),
             b'|' => self.match_assign(TokenType::Pipe, TokenType::PipeAssign),
             b'^' => self.match_assign(TokenType::Caret, TokenType::CaretAssign),
@@ -289,16 +218,22 @@ impl<'a> Lexer<'a> {
 
     fn scan_string(&mut self) -> Token {
         loop {
+            if self.is_eof() {
+                // 遇到真实的 EOF，说明字符串未闭合
+                return self.make_token(TokenType::Illegal);
+            }
+
             let char = self.peek();
             match char {
-                0 => return self.make_token(TokenType::Illegal), // 未闭合就结束
                 b'"' => {
                     self.advance(); // 吞掉右引号
                     break;
                 }
                 b'\\' => {
-                    self.advance(); // 跳过转义
-                    self.advance();
+                    self.advance(); // 跳过转义符
+                    if !self.is_eof() {
+                        self.advance(); // 跳过被转义的字符
+                    }
                 }
                 _ => {
                     self.advance();
@@ -444,12 +379,33 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_whitespace_and_comments(&mut self) {
         loop {
+            if self.is_eof() {
+                break;
+            }
             let c = self.peek();
             match c {
+                // 处理所有空白符
                 b' ' | b'\t' | b'\r' | b'\n' => {
                     self.advance();
+                }
+                // 处理注释
+                b'/' => {
+                    if self.peek_next() == b'/' {
+                        // 单行注释: 消费字符直到行尾或 EOF
+                        while !self.is_eof() && self.peek() != b'\n' {
+                            self.advance();
+                        }
+                    } else if self.peek_next() == b'*' {
+                        // 多行注释: 消费 /* 然后进入块处理
+                        self.advance(); // 吃掉 '/'
+                        self.advance(); // 吃掉 '*'
+                        self.skip_comment_block();
+                    } else {
+                        // 只是一个普通的除号，退出跳过逻辑，交由 next() 处理
+                        break; 
+                    }
                 }
                 _ => break,
             }
@@ -466,13 +422,11 @@ impl<'a> Lexer<'a> {
         let mut depth = 1;
 
         while depth > 0 {
-            let c = self.peek();
-
-            if c == 0 && self.current >= self.source.len() {
+            if self.is_eof() {
                 return false;
             }
+            let c = self.peek();
 
-            // 嵌套开始 /*
             if c == b'/' && self.peek_next() == b'*' {
                 self.advance();
                 self.advance();
@@ -480,7 +434,6 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            // 嵌套结束 */
             if c == b'*' && self.peek_next() == b'/' {
                 self.advance();
                 self.advance();
@@ -491,6 +444,11 @@ impl<'a> Lexer<'a> {
             self.advance();
         }
         true
+    }
+
+    #[inline]
+    fn is_eof(&self) -> bool {
+        self.current >= self.source.len()
     }
 }
 

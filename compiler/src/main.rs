@@ -7,9 +7,10 @@ fn print_usage(program_name: &str) {
     println!("Usage: {} [options] <input.kn>", program_name);
     println!("Options:");
     println!("  -o <file>      Write output to <file>");
+    println!("  -D <key=value>  Define a custom variable for conditional compilation");
+    println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
     println!("  -O0, -O1, -O2, -O3  Set optimization level");
     println!("  --emit-llvm    Print LLVM IR to stdout");
-    println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
     println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)");
     println!(
         "  --freestanding Compile for a freestanding environment (do not link C runtime/libc)"
@@ -73,6 +74,18 @@ fn parse_args() -> CompileOptions {
                         process::exit(1);
                     }
                 };
+            }
+            "-D" => {
+                let define_str = args.next().unwrap_or_else(|| {
+                    eprintln!("Error: Expected `key=value` after `-D`");
+                    process::exit(1);
+                });
+                let parts: Vec<&str> = define_str.splitn(2, '=').collect();
+                if parts.len() != 2 {
+                    eprintln!("Error: Invalid define format `{}`. Expected `key=value`.", define_str);
+                    process::exit(1);
+                }
+                options.custom_defines.insert(parts[0].to_string(), parts[1].to_string());
             }
             _ => {
                 if arg.starts_with('-') {

@@ -1,7 +1,6 @@
-#![allow(unused)]
 use super::lexer::Lexer;
 use super::token::{Token, TokenType};
-use crate::utils::{FileId, Span};
+use crate::utils::Span;
 use std::collections::VecDeque;
 
 pub struct TokenStream<'a> {
@@ -104,23 +103,6 @@ impl<'a> TokenStream<'a> {
             Some(self.bump())
         } else {
             None
-        }
-    }
-
-    /// 强制消耗一个 Token，如果类型不匹配则返回 Err
-    /// 这是 Parser 中最常用的方法
-    pub fn expect(&mut self, expected: TokenType) -> Result<Token, String> {
-        let current = self.peek();
-        if current.tag == expected {
-            Ok(self.bump())
-        } else {
-            // 这里返回 String 作为错误，实际项目中你可能想要返回自定义 Error 枚举
-            // 使用 last_span 还是 current.span 取决于你想报错的位置
-            // 通常报错在 current.span (即 "found xxx")
-            Err(format!(
-                "Expected {:?}, but found {:?} at {:?}",
-                expected, current.tag, current.span
-            ))
         }
     }
 

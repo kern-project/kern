@@ -338,6 +338,14 @@ impl<'a> Parser<'a> {
             TokenType::Identifier => self.parse_path_type(),
             TokenType::Mut => self.parse_mut_type(),
 
+            TokenType::Bang => {
+                self.advance();
+                Ok(TypeNode {
+                    id: self.new_id(),
+                    span: start_token.span,
+                    kind: TypeKind::Never,
+                })
+            }
             TokenType::Underscore => {
                 self.advance();
                 Ok(TypeNode {
@@ -419,7 +427,17 @@ impl<'a> Parser<'a> {
                 },
             })
         }
-        // B. 数组 [expr]T
+        // B. 数组推导 [_]T (为 .{ 1, 2, 3 } 准备)
+        else if self.match_token(&[TokenType::Underscore]) {
+            self.expect(TokenType::RBracket)?;
+            let elem = self.parse_type()?;
+            Ok(TypeNode {
+                id: self.new_id(),
+                span: start_span.to(elem.span),
+                kind: TypeKind::ArrayInfer(Box::new(elem)),
+            })
+        }
+        // C. 数组 [expr]T
         else {
             let len_expr = self.parse_expression(Precedence::Lowest)?;
             self.expect(TokenType::RBracket)?;
@@ -1715,7 +1733,7 @@ impl<'a> Parser<'a> {
                             // 剩下的重新组装回 Target Type
                             let remain_ty = TypeNode {
                                 id: self.new_id(),
-                                span: ty.span, // TODO: 近似
+                                span: ty.span, // 继承整体 Span，作为 Synthetic Node 报错锚点
                                 kind: TypeKind::Path {
                                     segments,
                                     generics: vec![],
@@ -2129,7 +2147,7 @@ impl<'a> Parser<'a> {
         let name = self.expect(TokenType::Identifier)?;
         let name_id = self.intern_token(name);
 
-        // 🌟 护城河：全局变量同样拦截左侧冒号
+        // 全局变量同样拦截左侧冒号
         if self.match_token(&[TokenType::Colon]) {
             let err_span = self.stream.prev_span();
             self.add_error(err_span, "Global variables no longer support left-side type annotations. Use explicit constructors: `static X = Type.{ value };`".to_string());

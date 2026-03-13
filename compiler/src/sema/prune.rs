@@ -50,24 +50,96 @@ impl<'a> Pruner<'a> {
     }
 
     fn prune_expr(&mut self, expr: &mut Expr) {
-        if let ExprKind::Block { stmts, .. } = &mut expr.kind {
-            // 过滤语句
-            stmts.retain_mut(|stmt| {
-                if !self.eval_attributes(&stmt.attributes) {
-                    false
-                } else {
-                    // 如果语句内还有表达式，递归进去
-                    match &mut stmt.kind {
-                        StmtKind::ExprStmt(e) | StmtKind::ExprValue(e) => {
-                            self.prune_expr(e);
+        match &mut expr.kind {
+            // 核心：处理 Block 并过滤 Stmt
+            ExprKind::Block { stmts, result } => {
+                stmts.retain_mut(|stmt| {
+                    if !self.eval_attributes(&stmt.attributes) {
+                        false
+                    } else {
+                        match &mut stmt.kind {
+                            StmtKind::ExprStmt(e) | StmtKind::ExprValue(e) => {
+                                self.prune_expr(e);
+                            }
                         }
+                        true
                     }
-                    true
+                });
+                if let Some(r) = result {
+                    self.prune_expr(r);
                 }
-            });
+            }
+
+            // 递归遍历所有包含子表达式的结构
+            ExprKind::If { cond, then_branch, else_branch } => {
+                self.prune_expr(cond);
+                self.prune_expr(then_branch);
+                if let Some(e) = else_branch {
+                    self.prune_expr(e);
+                }
+            }
+            ExprKind::Match { target, arms } => {
+                self.prune_expr(target);
+                for arm in arms {
+                    self.prune_expr(&mut arm.body);
+                }
+            }
+            ExprKind::Switch { target, cases, default_case } => {
+                self.prune_expr(target);
+                for case in cases {
+                    self.prune_expr(&mut case.body);
+                }
+                if let Some(d) = default_case {
+                    self.prune_expr(d);
+                }
+            }
+            ExprKind::For { init, cond, post, body } => {
+                if let Some(e) = init { self.prune_expr(e); }
+                if let Some(e) = cond { self.prune_expr(e); }
+                if let Some(e) = post { self.prune_expr(e); }
+                self.prune_expr(body);
+            }
+            ExprKind::Lambda { body, .. } => self.prune_expr(body),
+            ExprKind::Let { init, .. } | ExprKind::Static { init, .. } => self.prune_expr(init),
+            ExprKind::Binary { lhs, rhs, .. } | ExprKind::Assign { lhs, rhs, .. } => {
+                self.prune_expr(lhs);
+                self.prune_expr(rhs);
+            }
+            ExprKind::Unary { operand, .. } => self.prune_expr(operand),
+            ExprKind::FieldAccess { lhs, .. } | ExprKind::As { lhs, .. } => self.prune_expr(lhs),
+            ExprKind::IndexAccess { lhs, index } => {
+                self.prune_expr(lhs);
+                self.prune_expr(index);
+            }
+            ExprKind::Call { callee, args } => {
+                self.prune_expr(callee);
+                for arg in args { self.prune_expr(arg); }
+            }
+            ExprKind::DataInit { literal, .. } => match literal {
+                DataLiteralKind::Struct(fields) => {
+                    for f in fields { self.prune_expr(&mut f.value); }
+                }
+                DataLiteralKind::Array(elems) => {
+                    for e in elems { self.prune_expr(e); }
+                }
+                DataLiteralKind::Repeat { value, count } => {
+                    self.prune_expr(value);
+                    self.prune_expr(count);
+                }
+                DataLiteralKind::Scalar(val) => self.prune_expr(val),
+            },
+            ExprKind::SliceOp { lhs, start, end, .. } => {
+                self.prune_expr(lhs);
+                if let Some(s) = start { self.prune_expr(s); }
+                if let Some(e) = end { self.prune_expr(e); }
+            }
+            ExprKind::Defer { expr: e } => self.prune_expr(e),
+            ExprKind::Return(Some(e)) => self.prune_expr(e),
+            ExprKind::GenericInstantiation { target, .. } => self.prune_expr(target),
+
+            // 叶子节点 (如 Int, Float, Bool, Identifier, Break, Continue, Error 等) 无需递归
+            _ => {}
         }
-        // 注意：除了 Block 包含的 Statement，我们遵循“绝不在纯 Expr 级别支持属性剪枝”的原则。
-        // 所以不需要遍历 If/Binary 等其他 ExprKind。
     }
 
     /// 检查属性列表，如果有 #[if(expr)] 且求值为 false，则返回 false (应被剪枝)
