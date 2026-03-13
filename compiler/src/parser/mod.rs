@@ -747,7 +747,10 @@ impl<'a> Parser<'a> {
         Ok(TypeNode {
             id: self.new_id(),
             span: start_token.span.to(end_token.span),
-            kind: TypeKind::Adt { backing_type, variants },
+            kind: TypeKind::Adt {
+                backing_type,
+                variants,
+            },
         })
     }
 }

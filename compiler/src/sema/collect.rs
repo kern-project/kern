@@ -324,7 +324,10 @@ impl<'a> Collector<'a> {
                     span: decl.span,
                 })
             }
-            TypeKind::Adt { backing_type, variants } => {
+            TypeKind::Adt {
+                backing_type,
+                variants,
+            } => {
                 sym_kind = SymbolKind::Adt;
                 Def::Adt(AdtDef {
                     id: def_id,

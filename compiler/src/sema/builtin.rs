@@ -44,7 +44,7 @@ impl<'a> BuiltinInjector<'a> {
         }
 
         // 3. 注册内置函数 (Intrinsics)
-        self.inject_size_of();   
+        self.inject_size_of();
         self.inject_align_of();
         self.inject_int_to_float(int_trait_id, float_trait_id);
         self.inject_float_cast(float_trait_id);
@@ -242,7 +242,10 @@ impl<'a> BuiltinInjector<'a> {
         let info = SymbolInfo {
             kind: SymbolKind::Function,
             node_id: self.ctx.next_node_id(),
-            type_id: self.ctx.type_registry.intern(TypeKind::FnDef(def_id, vec![])),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
             def_id: Some(def_id),
             span: Default::default(),
             is_pub: true,

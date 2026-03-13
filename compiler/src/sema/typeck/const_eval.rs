@@ -2,7 +2,7 @@ use crate::driver::Context;
 use crate::parser::ast::{self, BinaryOperator, Expr, ExprKind, UnaryOperator};
 use crate::sema::def::Def;
 use crate::sema::scope::SymbolKind;
-use crate::sema::ty::{TypeId, TypeKind, PrimitiveType};
+use crate::sema::ty::{PrimitiveType, TypeId, TypeKind};
 use crate::utils::{Span, SymbolId};
 use std::collections::HashMap;
 
@@ -44,7 +44,9 @@ impl<'a> ConstEvaluator<'a> {
                 }
             }
             Ok(_) => {
-                self.ctx.struct_error(expr.span, "expected an integer constant").emit();
+                self.ctx
+                    .struct_error(expr.span, "expected an integer constant")
+                    .emit();
                 Err(())
             }
             Err(_) => Err(()),
@@ -56,7 +58,9 @@ impl<'a> ConstEvaluator<'a> {
         match self.eval_inner(expr, 0) {
             Ok(ConstValue::Int(val)) => Ok(val),
             Ok(_) => {
-                self.ctx.struct_error(expr.span, "expected an integer constant").emit();
+                self.ctx
+                    .struct_error(expr.span, "expected an integer constant")
+                    .emit();
                 Err(())
             }
             Err(_) => Err(()),
@@ -100,30 +104,28 @@ impl<'a> ConstEvaluator<'a> {
             }
 
             // === 6. 数据初始化 (支持嵌套 Array 和 Struct) ===
-            ExprKind::DataInit { literal, .. } => {
-                match literal {
-                    ast::DataLiteralKind::Scalar(inner) => self.eval_inner(inner, depth + 1),
-                    ast::DataLiteralKind::Array(elems) => {
-                        let mut arr = Vec::new();
-                        for e in elems {
-                            arr.push(self.eval_inner(e, depth + 1)?);
-                        }
-                        Ok(ConstValue::Array(arr))
+            ExprKind::DataInit { literal, .. } => match literal {
+                ast::DataLiteralKind::Scalar(inner) => self.eval_inner(inner, depth + 1),
+                ast::DataLiteralKind::Array(elems) => {
+                    let mut arr = Vec::new();
+                    for e in elems {
+                        arr.push(self.eval_inner(e, depth + 1)?);
                     }
-                    ast::DataLiteralKind::Struct(fields) => {
-                        let mut map = HashMap::new();
-                        for f in fields {
-                            map.insert(f.name, self.eval_inner(&f.value, depth + 1)?);
-                        }
-                        Ok(ConstValue::Struct(map))
-                    }
-                    ast::DataLiteralKind::Repeat { value, count } => {
-                        let val = self.eval_inner(value, depth + 1)?;
-                        let cnt = self.eval_usize(count)?;
-                        Ok(ConstValue::Array(vec![val; cnt as usize]))
-                    }
+                    Ok(ConstValue::Array(arr))
                 }
-            }
+                ast::DataLiteralKind::Struct(fields) => {
+                    let mut map = HashMap::new();
+                    for f in fields {
+                        map.insert(f.name, self.eval_inner(&f.value, depth + 1)?);
+                    }
+                    Ok(ConstValue::Struct(map))
+                }
+                ast::DataLiteralKind::Repeat { value, count } => {
+                    let val = self.eval_inner(value, depth + 1)?;
+                    let cnt = self.eval_usize(count)?;
+                    Ok(ConstValue::Array(vec![val; cnt as usize]))
+                }
+            },
 
             // === 7. 常量聚合访问 (提取结构体字段和数组索引) ===
             ExprKind::FieldAccess { lhs, field } => {
@@ -133,11 +135,18 @@ impl<'a> ConstEvaluator<'a> {
                         Ok(val.clone())
                     } else {
                         let field_str = self.ctx.resolve(*field);
-                        self.ctx.struct_error(expr.span, format!("field `{}` not found in constant struct", field_str)).emit();
+                        self.ctx
+                            .struct_error(
+                                expr.span,
+                                format!("field `{}` not found in constant struct", field_str),
+                            )
+                            .emit();
                         Err(())
                     }
                 } else {
-                    self.ctx.struct_error(expr.span, "attempted field access on a non-struct constant").emit();
+                    self.ctx
+                        .struct_error(expr.span, "attempted field access on a non-struct constant")
+                        .emit();
                     Err(())
                 }
             }
@@ -149,22 +158,33 @@ impl<'a> ConstEvaluator<'a> {
                     if idx < arr.len() as u64 {
                         Ok(arr[idx as usize].clone())
                     } else {
-                        self.ctx.struct_error(expr.span, "constant array index out of bounds").emit();
+                        self.ctx
+                            .struct_error(expr.span, "constant array index out of bounds")
+                            .emit();
                         Err(())
                     }
                 } else {
-                    self.ctx.struct_error(expr.span, "attempted indexing into a non-array constant").emit();
+                    self.ctx
+                        .struct_error(expr.span, "attempted indexing into a non-array constant")
+                        .emit();
                     Err(())
                 }
             }
 
             // === 8. 不支持的表达式 ===
             ExprKind::GenericInstantiation { .. } => {
-                self.ctx.struct_error(expr.span, "generic instantiation cannot be evaluated directly as a value").emit();
+                self.ctx
+                    .struct_error(
+                        expr.span,
+                        "generic instantiation cannot be evaluated directly as a value",
+                    )
+                    .emit();
                 Err(())
             }
             _ => {
-                self.ctx.struct_error(expr.span, "expected a valid constant expression").emit();
+                self.ctx
+                    .struct_error(expr.span, "expected a valid constant expression")
+                    .emit();
                 Err(())
             }
         }
@@ -194,7 +214,9 @@ impl<'a> ConstEvaluator<'a> {
                     Multiply => Ok(ConstValue::Int(l.wrapping_mul(r))),
                     Divide => {
                         if r == 0 {
-                            self.ctx.struct_error(span, "division by zero in constant expression").emit();
+                            self.ctx
+                                .struct_error(span, "division by zero in constant expression")
+                                .emit();
                             Err(())
                         } else {
                             Ok(ConstValue::Int(l / r))
@@ -202,7 +224,9 @@ impl<'a> ConstEvaluator<'a> {
                     }
                     Modulo => {
                         if r == 0 {
-                            self.ctx.struct_error(span, "modulo by zero in constant expression").emit();
+                            self.ctx
+                                .struct_error(span, "modulo by zero in constant expression")
+                                .emit();
                             Err(())
                         } else {
                             Ok(ConstValue::Int(l % r))
@@ -220,7 +244,9 @@ impl<'a> ConstEvaluator<'a> {
                     GreaterThan => Ok(ConstValue::Bool(l > r)),
                     GreaterOrEqual => Ok(ConstValue::Bool(l >= r)),
                     _ => {
-                        self.ctx.struct_error(span, "unsupported operator for constant integers").emit();
+                        self.ctx
+                            .struct_error(span, "unsupported operator for constant integers")
+                            .emit();
                         Err(())
                     }
                 }
@@ -239,7 +265,9 @@ impl<'a> ConstEvaluator<'a> {
                     GreaterThan => Ok(ConstValue::Bool(l > r)),
                     GreaterOrEqual => Ok(ConstValue::Bool(l >= r)),
                     _ => {
-                        self.ctx.struct_error(span, "unsupported operator for constant floats").emit();
+                        self.ctx
+                            .struct_error(span, "unsupported operator for constant floats")
+                            .emit();
                         Err(())
                     }
                 }
@@ -252,13 +280,20 @@ impl<'a> ConstEvaluator<'a> {
                     Equal => Ok(ConstValue::Bool(l == r)),
                     NotEqual => Ok(ConstValue::Bool(l != r)),
                     _ => {
-                        self.ctx.struct_error(span, "unsupported operator for constant booleans").emit();
+                        self.ctx
+                            .struct_error(span, "unsupported operator for constant booleans")
+                            .emit();
                         Err(())
                     }
                 }
             }
             _ => {
-                self.ctx.struct_error(span, "type mismatch or unsupported types in constant binary expression").emit();
+                self.ctx
+                    .struct_error(
+                        span,
+                        "type mismatch or unsupported types in constant binary expression",
+                    )
+                    .emit();
                 Err(())
             }
         }
@@ -278,7 +313,9 @@ impl<'a> ConstEvaluator<'a> {
             (UnaryOperator::BitwiseNot, ConstValue::Int(v)) => Ok(ConstValue::Int(!v)),
             (UnaryOperator::LogicalNot, ConstValue::Bool(v)) => Ok(ConstValue::Bool(!v)),
             _ => {
-                self.ctx.struct_error(span, "invalid unary operator for the given constant type").emit();
+                self.ctx
+                    .struct_error(span, "invalid unary operator for the given constant type")
+                    .emit();
                 Err(())
             }
         }
@@ -454,7 +491,9 @@ impl<'a> ConstEvaluator<'a> {
     }
 
     fn compute_type_align_inner(&mut self, ty: TypeId, depth: usize) -> u64 {
-        if depth > 100 { return 1; }
+        if depth > 100 {
+            return 1;
+        }
 
         let norm = self.ctx.type_registry.normalize(ty);
         let kind = self.ctx.type_registry.get(norm).clone();
@@ -481,7 +520,9 @@ impl<'a> ConstEvaluator<'a> {
     }
 
     fn compute_type_size_inner(&mut self, ty: TypeId, depth: usize) -> u64 {
-        if depth > 100 { return 0; }
+        if depth > 100 {
+            return 0;
+        }
 
         let norm = self.ctx.type_registry.normalize(ty);
         let kind = self.ctx.type_registry.get(norm).clone();
@@ -533,7 +574,12 @@ impl<'a> ConstEvaluator<'a> {
         }
     }
 
-    fn compute_def_align(&mut self, def_id: crate::sema::ty::DefId, generic_args: &[TypeId], depth: usize) -> u64 {
+    fn compute_def_align(
+        &mut self,
+        def_id: crate::sema::ty::DefId,
+        generic_args: &[TypeId],
+        depth: usize,
+    ) -> u64 {
         let def = self.ctx.defs[def_id.0 as usize].clone();
         match def {
             Def::Struct(s) => {
@@ -542,7 +588,9 @@ impl<'a> ConstEvaluator<'a> {
                 for field in &s.fields {
                     let f_ty = self.resolve_field_type(&field.type_node, &map);
                     let align = self.compute_type_align_inner(f_ty, depth + 1);
-                    if align > max_align { max_align = align; }
+                    if align > max_align {
+                        max_align = align;
+                    }
                 }
                 max_align
             }
@@ -552,7 +600,9 @@ impl<'a> ConstEvaluator<'a> {
                 for field in &u.fields {
                     let f_ty = self.resolve_field_type(&field.type_node, &map);
                     let align = self.compute_type_align_inner(f_ty, depth + 1);
-                    if align > max_align { max_align = align; }
+                    if align > max_align {
+                        max_align = align;
+                    }
                 }
                 max_align
             }
@@ -562,7 +612,11 @@ impl<'a> ConstEvaluator<'a> {
             }
             Def::Adt(a) => {
                 let tag_ty = a.backing_type.as_ref().map_or(TypeId::U32, |bt| {
-                    self.ctx.node_types.get(&bt.id).copied().unwrap_or(TypeId::U32)
+                    self.ctx
+                        .node_types
+                        .get(&bt.id)
+                        .copied()
+                        .unwrap_or(TypeId::U32)
                 });
                 let mut max_align = self.compute_type_align_inner(tag_ty, depth + 1);
 
@@ -571,7 +625,9 @@ impl<'a> ConstEvaluator<'a> {
                     if let Some(payload) = &v.payload_type {
                         let p_ty = self.resolve_field_type(payload, &map);
                         let align = self.compute_type_align_inner(p_ty, depth + 1);
-                        if align > max_align { max_align = align; }
+                        if align > max_align {
+                            max_align = align;
+                        }
                     }
                 }
                 max_align
@@ -580,7 +636,12 @@ impl<'a> ConstEvaluator<'a> {
         }
     }
 
-    fn compute_def_size(&mut self, def_id: crate::sema::ty::DefId, generic_args: &[TypeId], depth: usize) -> u64 {
+    fn compute_def_size(
+        &mut self,
+        def_id: crate::sema::ty::DefId,
+        generic_args: &[TypeId],
+        depth: usize,
+    ) -> u64 {
         let def = self.ctx.defs[def_id.0 as usize].clone();
         match def {
             Def::Struct(s) => {
@@ -593,7 +654,9 @@ impl<'a> ConstEvaluator<'a> {
                     let f_align = self.compute_type_align_inner(f_ty, depth + 1);
                     let f_size = self.compute_type_size_inner(f_ty, depth + 1);
 
-                    if f_align > max_align { max_align = f_align; }
+                    if f_align > max_align {
+                        max_align = f_align;
+                    }
                     offset = Self::align_to(offset, f_align);
                     offset += f_size;
                 }
@@ -609,8 +672,12 @@ impl<'a> ConstEvaluator<'a> {
                     let f_align = self.compute_type_align_inner(f_ty, depth + 1);
                     let f_size = self.compute_type_size_inner(f_ty, depth + 1);
 
-                    if f_align > max_align { max_align = f_align; }
-                    if f_size > max_size { max_size = f_size; }
+                    if f_align > max_align {
+                        max_align = f_align;
+                    }
+                    if f_size > max_size {
+                        max_size = f_size;
+                    }
                 }
                 Self::align_to(max_size, max_align)
             }
@@ -622,7 +689,11 @@ impl<'a> ConstEvaluator<'a> {
                 // ADT Size = align_to(TagSize, MaxAlign) + align_to(MaxPayloadSize, MaxAlign)
                 // (简化版的 C 布局，实际以 target data_layout 为准)
                 let tag_ty = a.backing_type.as_ref().map_or(TypeId::U32, |bt| {
-                    self.ctx.node_types.get(&bt.id).copied().unwrap_or(TypeId::U32)
+                    self.ctx
+                        .node_types
+                        .get(&bt.id)
+                        .copied()
+                        .unwrap_or(TypeId::U32)
                 });
                 let mut max_align = self.compute_type_align_inner(tag_ty, depth + 1);
                 let tag_size = self.compute_type_size_inner(tag_ty, depth + 1);
@@ -635,8 +706,12 @@ impl<'a> ConstEvaluator<'a> {
                         let p_ty = self.resolve_field_type(payload, &map);
                         let align = self.compute_type_align_inner(p_ty, depth + 1);
                         let size = self.compute_type_size_inner(p_ty, depth + 1);
-                        if align > max_align { max_align = align; }
-                        if size > max_payload_size { max_payload_size = size; }
+                        if align > max_align {
+                            max_align = align;
+                        }
+                        if size > max_payload_size {
+                            max_payload_size = size;
+                        }
                     }
                 }
 
@@ -663,10 +738,20 @@ impl<'a> ConstEvaluator<'a> {
         map
     }
 
-    fn resolve_field_type(&mut self, type_node: &ast::TypeNode, map: &HashMap<SymbolId, TypeId>) -> TypeId {
-        let mut f_ty = self.ctx.node_types.get(&type_node.id).copied().unwrap_or(TypeId::ERROR);
+    fn resolve_field_type(
+        &mut self,
+        type_node: &ast::TypeNode,
+        map: &HashMap<SymbolId, TypeId>,
+    ) -> TypeId {
+        let mut f_ty = self
+            .ctx
+            .node_types
+            .get(&type_node.id)
+            .copied()
+            .unwrap_or(TypeId::ERROR);
         if !map.is_empty() {
-            let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, map);
+            let mut subst =
+                crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, map);
             f_ty = subst.substitute(f_ty);
         }
         f_ty
@@ -674,7 +759,11 @@ impl<'a> ConstEvaluator<'a> {
 
     fn resolve_enum_backing_type(&self, e: &crate::sema::def::EnumDef) -> TypeId {
         if let Some(bt) = &e.backing_type {
-            self.ctx.node_types.get(&bt.id).copied().unwrap_or(TypeId::U32)
+            self.ctx
+                .node_types
+                .get(&bt.id)
+                .copied()
+                .unwrap_or(TypeId::U32)
         } else {
             TypeId::U32
         }

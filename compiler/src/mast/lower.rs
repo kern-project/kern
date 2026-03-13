@@ -408,7 +408,12 @@ impl<'a> Lowerer<'a> {
         // 2. 构建外部的 Wrapper Struct (Tag + Union)
         // 动态获取并泛型替换 ADT 的 Tag 类型
         let tag_ty = if let Some(bt) = &def.backing_type {
-            let raw_tag_ty = self.ctx.node_types.get(&bt.id).copied().unwrap_or(TypeId::U32);
+            let raw_tag_ty = self
+                .ctx
+                .node_types
+                .get(&bt.id)
+                .copied()
+                .unwrap_or(TypeId::U32);
             let mut subst = Substituter::new(&mut self.ctx.type_registry, &subst_map);
             subst.substitute(raw_tag_ty)
         } else {
@@ -1420,10 +1425,14 @@ impl<'a> Lowerer<'a> {
                         return MastExprKind::Integer(size as u128);
                     }
                     // 2. 对齐计算 @alignOf[T]() -> usize
-                    else if name_str == "@alignOf" { 
-                        let target_ty = if let TypeKind::FnDef(_, args) = self.ctx.type_registry.get(callee_mast.ty) {
+                    else if name_str == "@alignOf" {
+                        let target_ty = if let TypeKind::FnDef(_, args) =
+                            self.ctx.type_registry.get(callee_mast.ty)
+                        {
                             args[0]
-                        } else { TypeId::ERROR };
+                        } else {
+                            TypeId::ERROR
+                        };
                         let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
                         let align = ce.compute_type_align(target_ty);
                         return MastExprKind::Integer(align as u128);
