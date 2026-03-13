@@ -11,6 +11,7 @@ use crate::mast::ast::*;
 use crate::parser::ast;
 use crate::sema::def::Def;
 use crate::sema::ty::{PrimitiveType, TypeId, TypeKind, TypeRegistry};
+use crate::driver::config::OptLevel;
 
 pub struct CodeGenerator<'ctx, 'a> {
     pub context: &'ctx LlvmContext,
@@ -63,20 +64,13 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     pub fn compile(&mut self, module: &MastModule) {
         self.declare_structs(&module.structs);
         self.declare_globals(&module.globals);
-        let mut real_functions = Vec::new();
-        for f in &module.functions {
-            // TODO: 通过名字前缀拦截（或者你在 MastFunction 里加个 is_intrinsic 字段更好，这里我们用名字黑客一下）
-            if !f.name.starts_with("@") {
-                real_functions.push(f.clone());
-            }
-        }
-        self.declare_functions(&real_functions);
+        self.declare_functions(&module.functions);
 
         for global in &module.globals {
             self.compile_global(global);
         }
 
-        for function in &real_functions {
+        for function in &module.functions {
             if function.body.is_some() {
                 self.compile_function(function);
             }
@@ -166,7 +160,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 PrimitiveType::F64 => self.context.f64_type().into(),
                 PrimitiveType::Bool => self.context.bool_type().into(),
                 PrimitiveType::Str => self.context.ptr_type(AddressSpace::default()).into(),
-                PrimitiveType::Void => self.context.i8_type().into(),
+                PrimitiveType::Void | PrimitiveType::Never => self.context.i8_type().into(),
             },
             TypeKind::Pointer(_)
             | TypeKind::VolatilePtr(_)
@@ -228,6 +222,19 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         }
     }
 
+    /// 辅助函数：绕过 Inkwell BasicTypeEnum 没有统一 get_undef() 的限制
+    fn get_undef_val(&self, llvm_ty: BasicTypeEnum<'ctx>) -> BasicValueEnum<'ctx> {
+        match llvm_ty {
+            BasicTypeEnum::ArrayType(t) => t.get_undef().into(),
+            BasicTypeEnum::FloatType(t) => t.get_undef().into(),
+            BasicTypeEnum::IntType(t) => t.get_undef().into(),
+            BasicTypeEnum::PointerType(t) => t.get_undef().into(),
+            BasicTypeEnum::StructType(t) => t.get_undef().into(),
+            BasicTypeEnum::VectorType(t) => t.get_undef().into(),
+            BasicTypeEnum::ScalableVectorType(t) => t.get_undef().into(),
+        }
+    }
+
     /// 判断当前类型是否在物理上是 Void
     fn is_void_type(&self, ty: TypeId) -> bool {
         let mut norm = self.type_registry.normalize(ty);
@@ -284,32 +291,47 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         for s in structs {
             let llvm_struct = self.structs.get(&s.id).unwrap();
 
+            // 解析 #[packed] 属性
+            let is_packed = s.attributes.iter().any(|attr| {
+                matches!(attr, ast::MetaItem::Marker(id) if (self.ctx_resolve)(*id) == "packed")
+            });
+
             if s.is_union {
                 let target_ty = self.get_llvm_type(s.fields[s.largest_field_idx].ty);
-                llvm_struct.set_body(&[target_ty], false);
-            } else {
+                llvm_struct.set_body(&[target_ty], is_packed); 
                 let mut field_types = Vec::new();
                 for field in &s.fields {
                     field_types.push(self.get_llvm_type(field.ty));
                 }
-                llvm_struct.set_body(&field_types, false);
+                llvm_struct.set_body(&field_types, is_packed); 
             }
         }
     }
 
     fn declare_globals(&mut self, globals: &[MastGlobal]) {
         for g in globals {
-            // 防止同名 extern 全局变量冲突
+            // 动态计算导出名
+            let mut llvm_symbol_name = g.name.clone();
+            for attr in &g.attributes {
+                if let ast::MetaItem::Call(id, expr) = attr {
+                    if (self.ctx_resolve)(*id) == "export_name" {
+                        if let ast::ExprKind::String(s) = &expr.kind {
+                            llvm_symbol_name = s.clone();
+                        }
+                    }
+                }
+            }
+
+            // 防止同名extern变量冲突
             if g.is_extern {
-                if let Some(existing_global) = self.module.get_global(&g.name) {
+                if let Some(existing_global) = self.module.get_global(&llvm_symbol_name) {
                     self.globals.insert(g.id, existing_global);
                     continue;
                 }
             }
 
             let llvm_ty = self.get_llvm_type(g.ty);
-
-            let global_val = self.module.add_global(llvm_ty, None, &g.name);
+            let global_val = self.module.add_global(llvm_ty, None, &llvm_symbol_name);
             global_val.set_constant(!g.is_mut);
 
             if g.is_extern {
@@ -332,9 +354,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             }
 
             let fn_type = if f.ret_ty == TypeId::VOID {
-                self.context
-                    .void_type()
-                    .fn_type(&param_types, f.is_variadic)
+                self.context.void_type().fn_type(&param_types, f.is_variadic)
             } else {
                 match ret_ty {
                     BasicTypeEnum::IntType(i) => i.fn_type(&param_types, f.is_variadic),
@@ -346,16 +366,41 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 }
             };
 
-            // 防止同名 extern 函数被 LLVM 自动重命名为 `.1`
-            // 如果 LLVM 符号表中已经有了这个名字的函数，直接取出复用
+            // 动态计算导出名与 cold 属性
+            let mut llvm_symbol_name = f.name.clone();
+            let mut is_cold = false;
+
+            for attr in &f.attributes {
+                match attr {
+                    ast::MetaItem::Call(id, expr) if (self.ctx_resolve)(*id) == "export_name" => {
+                        if let ast::ExprKind::String(s) = &expr.kind {
+                            llvm_symbol_name = s.clone();
+                        }
+                    }
+                    ast::MetaItem::Marker(id) if (self.ctx_resolve)(*id) == "cold" => {
+                        is_cold = true;
+                    }
+                    _ => {}
+                }
+            }
+
+            // 防重名
             if f.is_extern {
-                if let Some(existing_func) = self.module.get_function(&f.name) {
+                if let Some(existing_func) = self.module.get_function(&llvm_symbol_name) {
                     self.functions.insert(f.id, existing_func);
                     continue;
                 }
             }
 
-            let llvm_func = self.module.add_function(&f.name, fn_type, None);
+            let llvm_func = self.module.add_function(&llvm_symbol_name, fn_type, None);
+            
+            // 给 LLVM 注入 cold 属性，优化分支预测
+            if is_cold {
+                let kind_id = inkwell::attributes::Attribute::get_named_enum_kind_id("cold");
+                let cold_attr = self.context.create_enum_attribute(kind_id, 0);
+                llvm_func.add_attribute(inkwell::attributes::AttributeLoc::Function, cold_attr);
+            }
+
             self.functions.insert(f.id, llvm_func);
         }
     }
@@ -451,7 +496,11 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
         match &expr.kind {
             // === 1. 字面量与常量 ===
-            MastExprKind::Undef => expected_llvm_ty.const_zero(),
+            MastExprKind::Undef => self.get_undef_val(expected_llvm_ty),
+            MastExprKind::Unreachable => {
+                self.builder.build_unreachable().unwrap();
+                self.get_undef_val(self.context.i8_type().into())
+            }
             MastExprKind::Integer(val) => expected_llvm_ty
                 .into_int_type()
                 .const_int(*val as u64, false)
@@ -640,14 +689,8 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             self.create_entry_block_alloca(union_llvm_ty.as_basic_type_enum(), "union_init");
 
         let val = self.compile_expr(value);
-        let val_ptr_ty = self.context.ptr_type(AddressSpace::default());
-        let casted_ptr = self
-            .builder
-            .build_bit_cast(alloca, val_ptr_ty, "union_bitcast")
-            .unwrap()
-            .into_pointer_value();
-
-        self.builder.build_store(casted_ptr, val).unwrap();
+        self.builder.build_store(alloca, val).unwrap();
+        
         self.builder
             .build_load(union_llvm_ty.as_basic_type_enum(), alloca, "union_load")
             .unwrap()
@@ -661,27 +704,16 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     ) -> BasicValueEnum<'ctx> {
         let struct_llvm_ty = *self.structs.get(&adt_struct_id).unwrap();
 
-        let tag_llvm_ty = struct_llvm_ty
-            .get_field_type_at_index(0)
-            .unwrap()
-            .into_int_type();
+        let tag_llvm_ty = struct_llvm_ty.get_field_type_at_index(0).unwrap().into_int_type();
         let tag_val = tag_llvm_ty.const_int(tag_value as u64, false);
 
         let union_llvm_ty = struct_llvm_ty.get_field_type_at_index(1).unwrap();
 
-        // 1. 组装 Payload Union
         let union_alloca = self.create_entry_block_alloca(union_llvm_ty, "adt_union_init");
 
         if payload.ty != TypeId::VOID && payload.ty != TypeId::ERROR {
             let payload_val = self.compile_expr(payload);
-            // LLVM IR 类型安全强转：将 Union 指针转换为具体 Payload 类型的指针
-            let payload_ptr_ty = self.context.ptr_type(AddressSpace::default());
-            let casted_ptr = self
-                .builder
-                .build_bit_cast(union_alloca, payload_ptr_ty, "union_bitcast")
-                .unwrap()
-                .into_pointer_value();
-            self.builder.build_store(casted_ptr, payload_val).unwrap();
+            self.builder.build_store(union_alloca, payload_val).unwrap();
         }
 
         let union_val = self
@@ -689,18 +721,9 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             .build_load(union_llvm_ty, union_alloca, "adt_union_load")
             .unwrap();
 
-        // 2. 组装最终的 ADT Struct
         let mut adt_struct = struct_llvm_ty.const_zero();
-        adt_struct = self
-            .builder
-            .build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag")
-            .unwrap()
-            .into_struct_value();
-        adt_struct = self
-            .builder
-            .build_insert_value(adt_struct, union_val, 1, "adt_insert_union")
-            .unwrap()
-            .into_struct_value();
+        adt_struct = self.builder.build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag").unwrap().into_struct_value();
+        adt_struct = self.builder.build_insert_value(adt_struct, union_val, 1, "adt_insert_union").unwrap().into_struct_value();
 
         adt_struct.into()
     }
@@ -735,16 +758,8 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         let is_union = self.union_ids.contains(&struct_id);
 
         if is_union {
-            // Union 读取：先将指针 Bitcast 为目标类型指针，再读取
-            let target_ptr_ty = self.context.ptr_type(AddressSpace::default());
-            let casted_ptr = self
-                .builder
-                .build_bit_cast(struct_ptr, target_ptr_ty, "union_field_cast")
-                .unwrap()
-                .into_pointer_value();
-
             self.builder
-                .build_load(expected_ty, casted_ptr, "union_field_load")
+                .build_load(expected_ty, struct_ptr, "union_field_load")
                 .unwrap()
         } else {
             let field_ptr = self
@@ -1752,7 +1767,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     //          Object File Generation
     // ==========================================
 
-    pub fn emit_to_file(&self, target_triple_str: &str, output_path: &str) -> Result<(), String> {
+    pub fn emit_to_file(&self, target_triple_str: &str, output_path: &str, opt_level: OptLevel) -> Result<(), String> {
         // 1. 初始化所有的 LLVM Target (x86, ARM, RISCV 等)
         Target::initialize_all(&InitializationConfig::default());
 
@@ -1761,13 +1776,21 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
         let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
 
+        // 动态映射 Kern 优化等级到 LLVM 优化等级
+        let llvm_opt_level = match opt_level {
+            OptLevel::O0 => inkwell::OptimizationLevel::None,
+            OptLevel::O1 => inkwell::OptimizationLevel::Less,
+            OptLevel::O2 => inkwell::OptimizationLevel::Default,
+            OptLevel::O3 => inkwell::OptimizationLevel::Aggressive,
+        };
+
         // 3. 创建目标机器实例 (配置优化级别、重定位模式等)
         let target_machine = target
             .create_target_machine(
                 &triple,
                 "generic",                           // CPU 类型
                 "",                                  // 特性
-                inkwell::OptimizationLevel::Default, // 可根据传入的 OptLevel 动态调整
+                llvm_opt_level, 
                 RelocMode::Default,
                 CodeModel::Default,
             )

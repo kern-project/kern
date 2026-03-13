@@ -106,6 +106,7 @@ pub struct FunctionDef {
     pub is_intrinsic: bool,
     pub span: Span,
     pub resolved_sig: Option<TypeId>,
+    pub attributes: Vec<crate::parser::ast::Attribute>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +118,7 @@ pub struct StructDef {
     pub fields: Vec<ast::StructFieldDef>,
     pub is_extern: bool,
     pub span: Span,
+    pub attributes: Vec<crate::parser::ast::Attribute>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,4 +198,5 @@ pub struct GlobalDef {
     pub is_static: bool,
     pub is_extern: bool,
     pub span: Span,
+    pub attributes: Vec<crate::parser::ast::Attribute>,
 }

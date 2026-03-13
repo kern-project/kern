@@ -209,6 +209,7 @@ impl<'a> Collector<'a> {
             is_intrinsic: false,
             span: decl.span,
             resolved_sig: None,
+            attributes: decl.attributes.clone(),
         };
 
         self.ctx.add_def(Def::Function(func_def));
@@ -247,6 +248,7 @@ impl<'a> Collector<'a> {
             is_static,
             is_extern,
             span: decl.span,
+            attributes: decl.attributes.clone(),
         };
 
         self.ctx.add_def(Def::Global(global_def));
@@ -293,6 +295,7 @@ impl<'a> Collector<'a> {
                     fields: fields.clone(),
                     is_extern,
                     span: decl.span,
+                    attributes: decl.attributes.clone(),
                 })
             }
             TypeKind::Union { fields } => {
