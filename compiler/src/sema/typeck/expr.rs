@@ -1409,13 +1409,15 @@ impl<'a> ExprChecker<'a> {
                 return self.check_asm_call(args, span);
             }
         }
-        
+
         let callee_ty = self.check_expr(callee, None);
         let norm_callee = self.strip_mut(callee_ty);
 
         if norm_callee == TypeId::ERROR {
             // 防止 AST 产生洞
-            for arg in args { self.check_expr(arg, None); }
+            for arg in args {
+                self.check_expr(arg, None);
+            }
             return TypeId::ERROR;
         }
 
@@ -1423,7 +1425,13 @@ impl<'a> ExprChecker<'a> {
         let (is_method, receiver_ty) = self.resolve_method_context(callee);
 
         // 3. 智能推导泛型参数，获取解析后的签名与修复后的 Callee 类型
-        let (sig_ty, inferred_callee_ty) = self.deduce_and_resolve_signature(norm_callee, args, is_method, receiver_ty, callee.span);
+        let (sig_ty, inferred_callee_ty) = self.deduce_and_resolve_signature(
+            norm_callee,
+            args,
+            is_method,
+            receiver_ty,
+            callee.span,
+        );
 
         // 4. 如果推导成功，将补全了泛型参数的类型重新写入 AST 节点
         // 这样 LLVM 降级层就能拿到具体的泛型实参
@@ -1432,13 +1440,18 @@ impl<'a> ExprChecker<'a> {
         }
 
         // 5. 校验最终签名并执行分发
-        if let TypeKind::Function { params, ret, is_variadic } = self.ctx.type_registry.get(sig_ty).clone() {
+        if let TypeKind::Function {
+            params,
+            ret,
+            is_variadic,
+        } = self.ctx.type_registry.get(sig_ty).clone()
+        {
             self.check_call_arity(args.len(), params.len(), is_method, is_variadic, span);
-            
+
             if is_method && !params.is_empty() {
                 self.check_method_receiver(params[0], receiver_ty, callee.span);
             }
-            
+
             self.check_call_arguments(args, &params, is_method, is_variadic);
             return ret;
         }
@@ -1451,7 +1464,7 @@ impl<'a> ExprChecker<'a> {
         TypeId::ERROR
     }
 
-    /// 助手：智能泛型推导与签名解析 
+    /// 助手：智能泛型推导与签名解析
     fn deduce_and_resolve_signature(
         &mut self,
         norm_callee: TypeId,
@@ -1460,12 +1473,14 @@ impl<'a> ExprChecker<'a> {
         receiver_ty: TypeId,
         span: Span,
     ) -> (TypeId, Option<TypeId>) {
-        if let TypeKind::FnDef(def_id, explicit_args) = self.ctx.type_registry.get(norm_callee).clone() {
+        if let TypeKind::FnDef(def_id, explicit_args) =
+            self.ctx.type_registry.get(norm_callee).clone()
+        {
             let (raw_sig, generics, fn_name_id) = match &self.ctx.defs[def_id.0 as usize] {
                 Def::Function(func) => (
                     func.resolved_sig.expect("Function signature missing"),
                     func.generics.clone(), // 提取并拷贝一份泛型参数列表
-                    func.name              
+                    func.name,
                 ),
                 _ => unreachable!(),
             };
@@ -1477,13 +1492,14 @@ impl<'a> ExprChecker<'a> {
                 return (raw_sig, None);
             }
 
-            // 规则 A：用户显式提供了完整的泛型参数 
+            // 规则 A：用户显式提供了完整的泛型参数
             if explicit_args.len() == generics_count {
                 let mut map = std::collections::HashMap::new();
                 for (i, param) in generics.iter().enumerate() {
                     map.insert(param.name, explicit_args[i]);
                 }
-                let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+                let mut subst =
+                    crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
                 return (subst.substitute(raw_sig), None);
             }
 
@@ -1498,9 +1514,13 @@ impl<'a> ExprChecker<'a> {
 
             // 规则 C：泛型完全省略，启动单向参数推导
             let mut map = std::collections::HashMap::new();
-            let raw_params = if let TypeKind::Function { params, .. } = self.ctx.type_registry.get(raw_sig).clone() {
+            let raw_params = if let TypeKind::Function { params, .. } =
+                self.ctx.type_registry.get(raw_sig).clone()
+            {
                 params
-            } else { unreachable!() };
+            } else {
+                unreachable!()
+            };
 
             let param_offset = if is_method { 1 } else { 0 };
 
@@ -1510,7 +1530,7 @@ impl<'a> ExprChecker<'a> {
                 self.unify(raw_params[0], stripped_recv, &mut map);
             }
 
-            // 2. 从实参推导 
+            // 2. 从实参推导
             for (i, arg) in args.iter().enumerate() {
                 let sig_idx = i + param_offset;
                 if sig_idx < raw_params.len() {
@@ -1536,19 +1556,31 @@ impl<'a> ExprChecker<'a> {
             // 规则 D：存在无法推导的泛型参数，报错
             if !missing_generics.is_empty() {
                 let name_str = self.ctx.resolve(fn_name_id).to_string();
-                self.ctx.struct_error(span, format!("cannot infer generic type(s) `{}` for function `{}`", missing_generics.join(", "), name_str))
+                self.ctx
+                    .struct_error(
+                        span,
+                        format!(
+                            "cannot infer generic type(s) `{}` for function `{}`",
+                            missing_generics.join(", "),
+                            name_str
+                        ),
+                    )
                     .with_hint("the compiler needs these generic types to be explicitly specified")
                     .emit();
                 return (TypeId::ERROR, None);
             }
 
             // 构造包含具体参数的 FnDef 类型，以便稍后写入 AST
-            let inferred_callee_ty = self.ctx.type_registry.intern(TypeKind::FnDef(def_id, resolved_args));
-            
-            let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+            let inferred_callee_ty = self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, resolved_args));
+
+            let mut subst =
+                crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
             return (subst.substitute(raw_sig), Some(inferred_callee_ty));
         }
-        
+
         (norm_callee, None)
     }
 

@@ -1,4 +1,4 @@
-# Kern Language Design (v0.3.0)
+# Kern Language Design (v0.3.8)
 
 ## Table of Contents
 
@@ -80,9 +80,9 @@ Kern **does not have a concept of "default types"** derived from compiler assump
 * **Dereference**: `ptr.*` (postfix, allows chained access like `ptr.*.field`).
 * **Null pointer**: literal `0` must be explicitly cast to a pointer type (e.g., `0 as *i32`).
 * **Pointer Arithmetic**: Implicit pointer arithmetic (e.g., `ptr + 1`) is **strictly forbidden**. To compute addresses, you must either:
+
 1. Cast to `usize`, perform the math, and cast back (e.g., `(ptr as usize + 4) as *u32`).
 2. Use standard library pointer methods.
-
 
 * **Casts**: explicit conversion required using `as`, preserving bit-patterns only.
 
@@ -110,8 +110,8 @@ Kern **does not have a concept of "default types"** derived from compiler assump
 
 ```kern
 type Point = struct {
-    x: i32,
-    y: i32,
+    x: i32,
+    y: i32,
 };
 
 ```
@@ -123,7 +123,7 @@ type Point = struct {
 
 ```kern
 // Immutable 
-let p1 = Point.{x: 10, y: 20};       
+let p1 = Point.{x: 10, y: 20};       
 
 // Mutable binding with explicit type and shorthand literal
 let p2 = mut Point.{x: 10, y: 20}; 
@@ -134,9 +134,9 @@ let p2 = mut Point.{x: 10, y: 20};
 
 ```kern
 type Payload = union {
-    as_int: i32,
-    as_float: f32,
-    raw: [4]mut u8,
+    as_int: i32,
+    as_float: f32,
+    raw: [4]mut u8,
 };
 
 ```
@@ -149,9 +149,9 @@ C‑style integer constant sets, but with strict value guarantees. Backing type 
 
 ```kern
 type Color: u8 = enum {
-    Red = 0,
-    Green, // 1
-    Blue,  // 2
+    Red = 0,
+    Green, // 1
+    Blue,  // 2
 };
 
 ```
@@ -161,10 +161,10 @@ type Color: u8 = enum {
 ```kern
 let raw_data = inb(0x60); // Read u8 from port
 let color = switch (raw_data) {
-    0 => Color.Red,
-    1 => Color.Green,
-    2 => Color.Blue,
-    else => Color.Red, // Mandatory fallback for unexpected values
+    0 => Color.Red,
+    1 => Color.Green,
+    2 => Color.Blue,
+    else => Color.Red, // Mandatory fallback for unexpected values
 };
 
 ```
@@ -182,7 +182,7 @@ Defined at module level.
 
 ```kern
 pub fn max(a: i32, b: i32) i32 {
-    if (a > b) a else b
+    if (a > b) a else b
 }
 
 ```
@@ -196,21 +196,24 @@ pub fn max(a: i32, b: i32) i32 {
 type Point = struct { x: i32, y: i32 };
 
 impl *mut Point {
-    // Signature omits 'self'. 'self' is inherently available as *mut Point.
-    pub fn move_by(dx: i32, dy: i32) void {
-        self.x += dx;
-        self.y += dy;
-    }
+    // Signature omits 'self'. 'self' is inherently available as *mut Point.
+    pub fn move_by(dx: i32, dy: i32) void {
+        self.x += dx;
+        self.y += dy;
+    }
 }
 
 ```
 
-### 5.3 Generics
+### 5.3 Generics and Elision
 
-Monomorphisation.
+Kern uses zero-cost monomorphisation for generics.
+To maintain high abstraction without losing predictability, Kern enforces **Strict Parameter-Driven Deduction** for function calls:
 
-* Function‑level: `fn map[T, U](input: T) U { … }`
-* Impl‑block level: `impl [T: Copy] List[T] { … }`
+1. **Explicit Instantiation**: You can always provide the explicit generic type: `max[u32](a, b)`.
+2. **Safe Elision**: If the generic parameter `T` appears in the function's parameter list, it can be safely elided. The compiler will implicitly deduce `T` from the arguments: `max(u32.{10}, u32.{20})`.
+3. **No Implicit Casting**: If deduction finds conflicting types (e.g., `u32` vs `u8`), the compiler will strictly throw an error. It will not attempt to implicitly cast them.
+4. **Mandatory Instantiation**: If `T` only appears in the return type (e.g., `@sizeOf[T]() -> usize`), it **must** be explicitly provided.
 
 ### 5.4 Traits
 
@@ -218,12 +221,12 @@ Traits define a set of pure function signatures representing a VTable. Similar t
 
 ```kern
 type Reader = trait {
-    read: fn([]u8) usize,
+    read: fn([]u8) usize,
 };
 
 // Pure semantic composition
 type ReadWriter: Reader + Writer = trait {
-    flush: fn() void,
+    flush: fn() void,
 };
 
 ```
@@ -273,10 +276,10 @@ Enhanced C‑style `switch`. No fallthrough.
 
 ```kern
 let result = switch (val) {
-    1..10 => 10,       // 1 to 9
-    11, 12, 13 => 20,
-    14..=15 => 30,     // 14 and 15
-    else => 0,
+    1..10 => 10,       // 1 to 9
+    11, 12, 13 => 20,
+    14..=15 => 30,     // 14 and 15
+    else => 0,
 };
 
 ```
@@ -289,8 +292,8 @@ Only `for` (no `while`, `do‑while`).
 
 ```kern
 for (let i = 0; i < 10; i += 1) { … }
-for (; cond ;) { … }          // while
-for (;;) { … }                // infinite loop
+for (; cond ;) { … }          // while
+for (;;) { … }                // infinite loop
 
 ```
 
@@ -373,9 +376,9 @@ External C functions can use the `...` syntax to support C-style variadic argume
 
 ```kern
 extern {
-    pub fn malloc(size: usize) *mut u8;
-    pub fn printf(format: *u8, ...) i32;
-    pub static MULTIBOOT_MAGIC = u32.{undef};
+    pub fn malloc(size: usize) *mut u8;
+    pub fn printf(format: *u8, ...) i32;
+    pub static MULTIBOOT_MAGIC = u32.{undef};
 }
 
 ```
@@ -383,13 +386,14 @@ extern {
 ## 9. Algebraic Data Types (ADT) and Pattern Matching
 
 An `adt` is implemented at the physical memory level as a Tagged Union (a hidden scalar discriminant tag followed by a union aligned to its largest variant).
+Like enums, the backing integer type of an ADT tag can be strictly defined (e.g., `type Status: u8 = adt { ... }`).
 
 ### 9.1 Defining ADTs
 
 ```kern
 pub type Result[T, E] = adt {
-    Ok: T,
-    Err: E,
+    Ok: T,
+    Err: E,
 };
 
 ```
@@ -400,8 +404,8 @@ Where the target type context is strictly explicit (e.g., function returns, argu
 
 ```kern
 fn safe_divide(a: i32, b: i32) Result[i32, i32] {
-    if (b == 0) return .{ Err: -1 }; 
-    return .{ Ok: a / b };
+    if (b == 0) return .{ Err: -1 }; 
+    return .{ Ok: a / b };
 }
 
 ```
@@ -415,8 +419,8 @@ Destructuring requires the `match` expression. `match` bindings perfectly mirror
 
 ```kern
 match (res) {
-    .Ok: val => printf("Result: %d\n\0", val),
-    .Err: code => printf("Error code: %d\n\0", code),
+    .Ok: val => printf("Result: %d\n\0", val),
+    .Err: code => printf("Error code: %d\n\0", code),
 }
 
 ```
@@ -437,7 +441,7 @@ let arr = [3]mut i32.{ 3, 1, 2 };
 
 // Safe, zero-allocation callback
 arr.sort(fn(a: i32, b: i32) bool {
-    return a < b;
+    return a < b;
 });
 
 ```
@@ -452,20 +456,20 @@ The parameters passed to `@asm` (such as the `asm` string array, `clobbers`, and
 
 ```kern
 pub fn outb_and_read(port: u16, data: u8) u8 {
-    let status = mut u8.{undef};
+    let status = mut u8.{undef};
 
-    @asm(.{
-        asm: .{
-            "out dx, al",
-            "in al, dx"
-        },
-        outputs: .{ al: status.& },   // Binds register to mutable pointer
-        inputs: .{ dx: port, al: data },
-        clobbers: .{ "memory" },      // Compile-time known
-        volatile: true                // Compile-time known
-    });
+    @asm(.{
+        asm: .{
+            "out dx, al",
+            "in al, dx"
+        },
+        outputs: .{ al: status.& },   // Binds register to mutable pointer
+        inputs: .{ dx: port, al: data },
+        clobbers: .{ "memory" },      // Compile-time known
+        volatile: true                // Compile-time known
+    });
 
-    return status;
+    return status;
 }
 
 ```
@@ -505,13 +509,13 @@ A comma-separated list of tags attached to the AST for compiler side-effects. Me
 **B. Memory Layout**
 
 * `packed`: Removes all padding between struct/union fields. The size becomes exactly the sum of its fields, at the cost of potential unaligned memory access penalties.
-* `align(N)`: *(Planned)* Forces the alignment of a struct or static variable to `N` bytes (e.g., `#[align(4096)]` for page tables).
+* `align(N)`: Forces the alignment of a struct or static variable to `N` bytes (e.g., `#[align(4096)]` for page tables).
 
 **C. Optimization & Control Flow**
 
 * `cold`: Marks a function as rarely executed, moving it out of the hot instruction cache and optimizing branching.
+* `naked`: Instructs the compiler to omit the standard function prologue and epilogue. Strictly used for hardware interrupt handlers and contextual context-switching alongside `@asm`.
 * `inline(always)` / `inline(never)`: *(Planned)* Overrides the LLVM inliner's heuristic.
-* `naked`: *(Planned)* Instructs the compiler to omit the standard function prologue and epilogue. Strictly used for hardware interrupt handlers and contextual context-switching alongside `@asm`.
 
 ---
 
@@ -540,15 +544,19 @@ Kern explicitly rejects using the `as` operator for data conversions that mutate
 ### 13.3 Hardware & Execution Control
 
 * `@unreachable() -> !`: Emits an unreachable instruction. Informs the optimizer that a control flow path is physically impossible, allowing it to eliminate dead branches (often used in exhaustiveness fallback).
-* `@trap() -> !`: *(Planned)* Emits an illegal instruction to deliberately crash/halt the program securely.
-* `@fence()`: *(Planned)* Emits a compiler memory fence to prevent instruction reordering around sensitive MMIO operations.
+* `@trap() -> !`: Emits an illegal instruction (`llvm.trap`) to deliberately crash/halt the program securely.
+* `@fence()`: Emits a strictly sequentially-consistent memory fence (`mfence`) to prevent instruction reordering around sensitive MMIO operations.
+* `@breakpoint()`: Triggers a hardware breakpoint (`llvm.debugtrap`) for system debuggers.
 
 *(Note: Kern does not provide `@volatileLoad` or `@volatileStore` intrinsics. Instead, Kern treats volatility as a first-class type qualifier (`^T` and `^mut T`). Hardware register accesses are performed via standard dereferencing `ptr.*` on a volatile pointer, yielding perfectly predictable code without intrinsic clutter.)*
 
-### 13.4 Bitwise Math (Planned)
+### 13.4 Bitwise Math & Memory Operations
 
-Mapped directly to single-cycle CPU instructions where available:
+Mapped directly to single-cycle CPU instructions and highly optimized backend primitives where available:
 
-* `@popCount(val)`: Returns the number of set bits (1s).
-* `@clz(val)`: Count leading zeros.
-* `@ctz(val)`: Count trailing zeros.
+* `@popCount[T: Integer](val: T) -> T`: Returns the number of set bits (1s).
+* `@clz[T: Integer](val: T) -> T`: Count leading zeros.
+* `@ctz[T: Integer](val: T) -> T`: Count trailing zeros.
+* `@bswap[T: Integer](val: T) -> T`: Reverses the byte order of an integer value (useful for endianness conversions).
+* `@memcpy(dest: *mut u8, src: *u8, len: usize) void`: Performs a highly-optimized bulk memory copy.
+* `@memset(dest: *mut u8, val: u8, len: usize) void`: Performs a highly-optimized bulk memory fill.
