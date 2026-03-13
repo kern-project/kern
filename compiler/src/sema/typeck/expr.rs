@@ -1403,53 +1403,46 @@ impl<'a> ExprChecker<'a> {
 
     fn check_call(&mut self, callee: &Expr, args: &[Expr], span: Span) -> TypeId {
         // 1. 拦截 @asm 宏调用
-        // 这必须在解析 callee_ty 之前，因为 @asm 并没有在全局作用域中注册
         if let ExprKind::Identifier(sym) = &callee.kind {
             if self.ctx.resolve(*sym) == "@asm" {
-                // 确保 @asm 作为一个整体被正确类型化为 void，防止产生 AST 空洞
                 self.ctx.node_types.insert(callee.id, TypeId::VOID);
                 return self.check_asm_call(args, span);
             }
         }
+        
         let callee_ty = self.check_expr(callee, None);
         let norm_callee = self.strip_mut(callee_ty);
 
         if norm_callee == TypeId::ERROR {
-            // 确保每个实参节点都能被推导并注册到 ctx.node_types 中，防止产生 AST 空洞。
-            for arg in args {
-                self.check_expr(arg, None);
-            }
+            // 防止 AST 产生洞
+            for arg in args { self.check_expr(arg, None); }
             return TypeId::ERROR;
         }
 
-        // 2. 获取准确的函数签名 (处理泛型单态化替换)
-        let sig_ty = self.resolve_callee_signature(norm_callee);
+        // 2. 探查是否是方法调用，提取接收者 (Receiver) 信息
+        let (is_method, receiver_ty) = self.resolve_method_context(callee);
 
-        // 3. 校验签名并执行分发
-        if let TypeKind::Function {
-            params,
-            ret,
-            is_variadic,
-        } = self.ctx.type_registry.get(sig_ty).clone()
-        {
-            // a. 探查是否是方法调用，提取接收者 (Receiver) 信息
-            let (is_method, receiver_ty) = self.resolve_method_context(callee);
+        // 3. 智能推导泛型参数，获取解析后的签名与修复后的 Callee 类型
+        let (sig_ty, inferred_callee_ty) = self.deduce_and_resolve_signature(norm_callee, args, is_method, receiver_ty, callee.span);
 
-            // b. 校验参数数量 (Arity)
+        // 4. 如果推导成功，将补全了泛型参数的类型重新写入 AST 节点
+        // 这样 LLVM 降级层就能拿到具体的泛型实参
+        if let Some(fixed_ty) = inferred_callee_ty {
+            self.ctx.node_types.insert(callee.id, fixed_ty);
+        }
+
+        // 5. 校验最终签名并执行分发
+        if let TypeKind::Function { params, ret, is_variadic } = self.ctx.type_registry.get(sig_ty).clone() {
             self.check_call_arity(args.len(), params.len(), is_method, is_variadic, span);
-
-            // c. 校验方法接收者上下文 (隐式 Self 匹配)
+            
             if is_method && !params.is_empty() {
                 self.check_method_receiver(params[0], receiver_ty, callee.span);
             }
-
-            // d. 逐个校验传入参数 (包含 C ABI 可变参数规则)
+            
             self.check_call_arguments(args, &params, is_method, is_variadic);
-
             return ret;
         }
 
-        // 4. 兜底报错：该类型不可调用
         let callee_str = self.ctx.ty_to_string(callee_ty);
         self.ctx
             .struct_error(callee.span, "expression is not callable")
@@ -1458,33 +1451,105 @@ impl<'a> ExprChecker<'a> {
         TypeId::ERROR
     }
 
-    /// 助手 1：解析函数的实际签名。如果是带有泛型实参的 FnDef，立即执行类型替换。
-    fn resolve_callee_signature(&mut self, norm_callee: TypeId) -> TypeId {
-        if let TypeKind::FnDef(def_id, generic_args) =
-            self.ctx.type_registry.get(norm_callee).clone()
-        {
-            let f = match &self.ctx.defs[def_id.0 as usize] {
-                Def::Function(func) => func,
+    /// 助手：智能泛型推导与签名解析 
+    fn deduce_and_resolve_signature(
+        &mut self,
+        norm_callee: TypeId,
+        args: &[Expr],
+        is_method: bool,
+        receiver_ty: TypeId,
+        span: Span,
+    ) -> (TypeId, Option<TypeId>) {
+        if let TypeKind::FnDef(def_id, explicit_args) = self.ctx.type_registry.get(norm_callee).clone() {
+            let (raw_sig, generics, fn_name_id) = match &self.ctx.defs[def_id.0 as usize] {
+                Def::Function(func) => (
+                    func.resolved_sig.expect("Function signature missing"),
+                    func.generics.clone(), // 提取并拷贝一份泛型参数列表
+                    func.name              
+                ),
                 _ => unreachable!(),
             };
 
-            let raw_sig = f.resolved_sig.expect("Function signature missing");
+            let generics_count = generics.len();
 
-            // 如果存在泛型，执行查表和替换
-            if !f.generics.is_empty() && !generic_args.is_empty() {
-                let mut map = std::collections::HashMap::new();
-                for (i, param) in f.generics.iter().enumerate() {
-                    map.insert(param.name, generic_args[i]);
-                }
-                let mut subst =
-                    crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
-                return subst.substitute(raw_sig);
+            // 如果没有泛型，直接返回原始签名
+            if generics_count == 0 {
+                return (raw_sig, None);
             }
-            return raw_sig;
-        }
 
-        // 普通函数指针
-        norm_callee
+            // 规则 A：用户显式提供了完整的泛型参数 
+            if explicit_args.len() == generics_count {
+                let mut map = std::collections::HashMap::new();
+                for (i, param) in generics.iter().enumerate() {
+                    map.insert(param.name, explicit_args[i]);
+                }
+                let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+                return (subst.substitute(raw_sig), None);
+            }
+
+            // 规则 B：不允许部分提供泛型参数
+            if !explicit_args.is_empty() {
+                let name_str = self.ctx.resolve(fn_name_id).to_string();
+                self.ctx.struct_error(span, format!("function `{}` requires exactly {} generic arguments, but {} were provided", name_str, generics_count, explicit_args.len()))
+                    .with_hint("either provide all generic arguments or omit them entirely to let the compiler infer them")
+                    .emit();
+                return (TypeId::ERROR, None);
+            }
+
+            // 规则 C：泛型完全省略，启动单向参数推导
+            let mut map = std::collections::HashMap::new();
+            let raw_params = if let TypeKind::Function { params, .. } = self.ctx.type_registry.get(raw_sig).clone() {
+                params
+            } else { unreachable!() };
+
+            let param_offset = if is_method { 1 } else { 0 };
+
+            // 1. 优先从 Receiver (比如 list.push) 推导
+            if is_method && !raw_params.is_empty() {
+                let stripped_recv = self.strip_mut(receiver_ty);
+                self.unify(raw_params[0], stripped_recv, &mut map);
+            }
+
+            // 2. 从实参推导 
+            for (i, arg) in args.iter().enumerate() {
+                let sig_idx = i + param_offset;
+                if sig_idx < raw_params.len() {
+                    let arg_ty = self.check_expr(arg, None);
+                    let arg_norm = self.strip_mut(arg_ty);
+                    if arg_norm != TypeId::ERROR {
+                        self.unify(raw_params[sig_idx], arg_norm, &mut map);
+                    }
+                }
+            }
+
+            // 3. 检查是否所有泛型参数都被成功推导
+            let mut missing_generics = Vec::new();
+            let mut resolved_args = Vec::new();
+            for param in &generics {
+                if let Some(&inferred_ty) = map.get(&param.name) {
+                    resolved_args.push(inferred_ty);
+                } else {
+                    missing_generics.push(self.ctx.resolve(param.name).to_string());
+                }
+            }
+
+            // 规则 D：存在无法推导的泛型参数，报错
+            if !missing_generics.is_empty() {
+                let name_str = self.ctx.resolve(fn_name_id).to_string();
+                self.ctx.struct_error(span, format!("cannot infer generic type(s) `{}` for function `{}`", missing_generics.join(", "), name_str))
+                    .with_hint("the compiler needs these generic types to be explicitly specified")
+                    .emit();
+                return (TypeId::ERROR, None);
+            }
+
+            // 构造包含具体参数的 FnDef 类型，以便稍后写入 AST
+            let inferred_callee_ty = self.ctx.type_registry.intern(TypeKind::FnDef(def_id, resolved_args));
+            
+            let mut subst = crate::sema::typeck::subst::Substituter::new(&mut self.ctx.type_registry, &map);
+            return (subst.substitute(raw_sig), Some(inferred_callee_ty));
+        }
+        
+        (norm_callee, None)
     }
 
     /// 助手 2：判断这是否是一个方法调用，如果是，提取它的 Receiver 类型 (LHS)
