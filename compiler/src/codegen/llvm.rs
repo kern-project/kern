@@ -310,19 +310,32 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
     fn declare_globals(&mut self, globals: &[MastGlobal]) {
         for g in globals {
-            // 动态计算导出名
             let mut llvm_symbol_name = g.name.clone();
+            let mut link_section = None;
+            let mut align_bytes = None;
+
             for attr in &g.attributes {
-                if let ast::MetaItem::Call(id, expr) = attr {
-                    if (self.ctx_resolve)(*id) == "export_name" {
+                match attr {
+                    ast::MetaItem::Call(id, expr) => {
+                        let name_str = (self.ctx_resolve)(*id);
+                        if name_str == "export_name" {
                         if let ast::ExprKind::String(s) = &expr.kind {
                             llvm_symbol_name = s.clone();
                         }
+                        } else if name_str == "link_section" {
+                            if let ast::ExprKind::String(s) = &expr.kind {
+                                link_section = Some(s.clone());
+                            }
+                        } else if name_str == "align" {
+                            if let ast::ExprKind::Integer(val) = &expr.kind {
+                                align_bytes = Some(*val as u32);
+                            }
+                        }
                     }
+                    _ => {}
                 }
             }
 
-            // 防止同名extern变量冲突
             if g.is_extern {
                 if let Some(existing_global) = self.module.get_global(&llvm_symbol_name) {
                     self.globals.insert(g.id, existing_global);
@@ -338,6 +351,13 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 global_val.set_linkage(inkwell::module::Linkage::External);
             } else {
                 global_val.set_initializer(&llvm_ty.const_zero());
+            }
+
+            if let Some(sec) = link_section {
+                global_val.set_section(Some(&sec));
+            }
+            if let Some(align) = align_bytes {
+                global_val.set_alignment(align);
             }
 
             self.globals.insert(g.id, global_val);
@@ -368,25 +388,36 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 }
             };
 
-            // 动态计算导出名与 cold 属性
             let mut llvm_symbol_name = f.name.clone();
             let mut is_cold = false;
+            let mut is_naked = false;
+            let mut link_section = None;
 
             for attr in &f.attributes {
                 match attr {
-                    ast::MetaItem::Call(id, expr) if (self.ctx_resolve)(*id) == "export_name" => {
+                    ast::MetaItem::Call(id, expr) => {
+                        let name_str = (self.ctx_resolve)(*id);
+                        if name_str == "export_name" {
                         if let ast::ExprKind::String(s) = &expr.kind {
                             llvm_symbol_name = s.clone();
+                            }
+                        } else if name_str == "link_section" {
+                            if let ast::ExprKind::String(s) = &expr.kind {
+                                link_section = Some(s.clone());
+                            }
                         }
                     }
-                    ast::MetaItem::Marker(id) if (self.ctx_resolve)(*id) == "cold" => {
+                    ast::MetaItem::Marker(id) => {
+                        let name_str = (self.ctx_resolve)(*id);
+                        if name_str == "cold" {
                         is_cold = true;
+                        } else if name_str == "naked" {
+                            is_naked = true;
                     }
-                    _ => {}
+                    }
                 }
             }
 
-            // 防重名
             if f.is_extern {
                 if let Some(existing_func) = self.module.get_function(&llvm_symbol_name) {
                     self.functions.insert(f.id, existing_func);
@@ -396,11 +427,18 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
             let llvm_func = self.module.add_function(&llvm_symbol_name, fn_type, None);
 
-            // 给 LLVM 注入 cold 属性，优化分支预测
             if is_cold {
                 let kind_id = inkwell::attributes::Attribute::get_named_enum_kind_id("cold");
                 let cold_attr = self.context.create_enum_attribute(kind_id, 0);
                 llvm_func.add_attribute(inkwell::attributes::AttributeLoc::Function, cold_attr);
+            }
+            if is_naked {
+                let kind_id = inkwell::attributes::Attribute::get_named_enum_kind_id("naked");
+                let naked_attr = self.context.create_enum_attribute(kind_id, 0);
+                llvm_func.add_attribute(inkwell::attributes::AttributeLoc::Function, naked_attr);
+            }
+            if let Some(sec) = link_section {
+                llvm_func.as_global_value().set_section(Some(&sec));
             }
 
             self.functions.insert(f.id, llvm_func);
