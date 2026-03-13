@@ -641,7 +641,10 @@ impl<'a> BuiltinInjector<'a> {
         let info = SymbolInfo {
             kind: SymbolKind::Function,
             node_id: self.ctx.next_node_id(),
-            type_id: self.ctx.type_registry.intern(TypeKind::FnDef(def_id, vec![])),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
             def_id: Some(def_id),
             span: Default::default(),
             is_pub: true,

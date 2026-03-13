@@ -53,7 +53,7 @@ impl<'a> ModuleLoader<'a> {
             Ok(s) => s,
             Err(e) => {
                 // 不仅打印，还要通知 Context 出现了致命错误
-                self.ctx.error_count += 1; 
+                self.ctx.error_count += 1;
                 eprintln!(
                     "Error: Cannot read module file '{}': {}",
                     abs_path.display(),

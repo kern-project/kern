@@ -44,12 +44,17 @@ impl CompilerDriver {
         let source_code = match fs::read_to_string(&self.options.input_file) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Error: Cannot read input file '{}': {}", self.options.input_file, e);
+                eprintln!(
+                    "Error: Cannot read input file '{}': {}",
+                    self.options.input_file, e
+                );
                 return false;
             }
         };
 
-        let _ = ctx.source_manager.add_file(self.options.input_file.clone(), source_code);
+        let _ = ctx
+            .source_manager
+            .add_file(self.options.input_file.clone(), source_code);
 
         let mut builtin = BuiltinInjector::new(&mut ctx);
         builtin.inject();
@@ -60,29 +65,47 @@ impl CompilerDriver {
             std::mem::take(&mut loader.asts)
         };
 
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut pruner = crate::sema::prune::Pruner::new(&mut ctx);
         pruner.prune_all(&mut asts);
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut collector = Collector::new(&mut ctx);
         for (mod_id, ast) in asts {
             collector.collect_ast(mod_id, &ast);
         }
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut import_resolver = ImportResolver::new(&mut ctx);
         import_resolver.resolve_all();
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut type_resolver = TypeResolver::new(&mut ctx);
         type_resolver.resolve_all();
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut typeck = TypeckDriver::new(&mut ctx);
         typeck.check_all();
-        if ctx.has_errors() { ctx.print_diagnostics(); return false; }
+        if ctx.has_errors() {
+            ctx.print_diagnostics();
+            return false;
+        }
 
         let mut lowerer = Lowerer::new(&mut ctx);
         let mast_module = lowerer.lower_all();
@@ -116,25 +139,27 @@ impl CompilerDriver {
         }
 
         let obj_path_str = format!("{}.tmp.o", self.options.output_file);
-        
+
         // 使用 RAII 守卫保护临时文件，无论是 Err 提前返回还是 CC 失败，都会自动清理
-        let _guard = TempFileGuard { path: obj_path_str.clone() };
+        let _guard = TempFileGuard {
+            path: obj_path_str.clone(),
+        };
 
         if let Err(e) = codegen.emit_to_file(
-            &self.options.target.triple.to_string(), 
+            &self.options.target.triple.to_string(),
             &obj_path_str,
-            self.options.opt_level
+            self.options.opt_level,
         ) {
             eprintln!("Error: LLVM failed to generate object file: {}", e);
             return false;
         }
 
         println!("Linking...");
-        
+
         // 支持通过环境变量指定自定义交叉编译器 (如 CC=x86_64-elf-gcc)
         let cc_compiler = std::env::var("CC").unwrap_or_else(|_| "cc".to_string());
         let mut cmd = std::process::Command::new(&cc_compiler);
-        
+
         cmd.arg(&obj_path_str)
             .arg("-no-pie")
             .arg("-o")

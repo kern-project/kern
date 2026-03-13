@@ -1,5 +1,5 @@
-use crate::utils::SymbolId;
 use crate::driver::Context;
+use crate::utils::SymbolId;
 use std::collections::HashMap;
 
 /// 类型的唯一 ID (轻量级 Handle)
@@ -307,7 +307,10 @@ impl<'a> TypeFormatter<'a> {
             | TypeKind::TraitObject(def_id, generics)
             | TypeKind::Adt(def_id, generics) => {
                 let def = &self.ctx.defs[def_id.0 as usize];
-                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                let name = def
+                    .name()
+                    .map(|sym| self.ctx.resolve(sym))
+                    .unwrap_or("<anonymous>");
                 if generics.is_empty() {
                     name.to_string()
                 } else {
@@ -318,7 +321,10 @@ impl<'a> TypeFormatter<'a> {
 
             TypeKind::AdtPayload(def_id, generics) => {
                 let def = &self.ctx.defs[def_id.0 as usize];
-                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                let name = def
+                    .name()
+                    .map(|sym| self.ctx.resolve(sym))
+                    .unwrap_or("<anonymous>");
                 if generics.is_empty() {
                     format!("{}::Payload", name)
                 } else {
@@ -330,7 +336,11 @@ impl<'a> TypeFormatter<'a> {
             TypeKind::Alias(sym, _) => self.ctx.resolve(*sym).to_string(),
             TypeKind::Param(sym) => self.ctx.resolve(*sym).to_string(),
 
-            TypeKind::Function { params, ret, is_variadic } => {
+            TypeKind::Function {
+                params,
+                ret,
+                is_variadic,
+            } => {
                 let mut param_strs: Vec<String> = params.iter().map(|p| self.format(*p)).collect();
                 if *is_variadic {
                     param_strs.push("...".to_string());
@@ -340,7 +350,10 @@ impl<'a> TypeFormatter<'a> {
 
             TypeKind::FnDef(def_id, generics) => {
                 let def = &self.ctx.defs[def_id.0 as usize];
-                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous fn>");
+                let name = def
+                    .name()
+                    .map(|sym| self.ctx.resolve(sym))
+                    .unwrap_or("<anonymous fn>");
                 if generics.is_empty() {
                     format!("fn item `{}`", name)
                 } else {
@@ -351,7 +364,10 @@ impl<'a> TypeFormatter<'a> {
 
             TypeKind::Module(def_id) => {
                 let def = &self.ctx.defs[def_id.0 as usize];
-                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                let name = def
+                    .name()
+                    .map(|sym| self.ctx.resolve(sym))
+                    .unwrap_or("<anonymous>");
                 format!("module `{}`", name)
             }
 

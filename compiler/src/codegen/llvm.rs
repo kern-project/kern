@@ -7,11 +7,11 @@ use inkwell::types::{BasicType, BasicTypeEnum, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue, GlobalValue, PointerValue};
 use std::collections::HashMap;
 
+use crate::driver::config::OptLevel;
 use crate::mast::ast::*;
 use crate::parser::ast;
 use crate::sema::def::Def;
 use crate::sema::ty::{PrimitiveType, TypeId, TypeKind, TypeRegistry};
-use crate::driver::config::OptLevel;
 
 pub struct CodeGenerator<'ctx, 'a> {
     pub context: &'ctx LlvmContext,
@@ -298,12 +298,12 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
             if s.is_union {
                 let target_ty = self.get_llvm_type(s.fields[s.largest_field_idx].ty);
-                llvm_struct.set_body(&[target_ty], is_packed); 
+                llvm_struct.set_body(&[target_ty], is_packed);
                 let mut field_types = Vec::new();
                 for field in &s.fields {
                     field_types.push(self.get_llvm_type(field.ty));
                 }
-                llvm_struct.set_body(&field_types, is_packed); 
+                llvm_struct.set_body(&field_types, is_packed);
             }
         }
     }
@@ -354,7 +354,9 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             }
 
             let fn_type = if f.ret_ty == TypeId::VOID {
-                self.context.void_type().fn_type(&param_types, f.is_variadic)
+                self.context
+                    .void_type()
+                    .fn_type(&param_types, f.is_variadic)
             } else {
                 match ret_ty {
                     BasicTypeEnum::IntType(i) => i.fn_type(&param_types, f.is_variadic),
@@ -393,7 +395,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             }
 
             let llvm_func = self.module.add_function(&llvm_symbol_name, fn_type, None);
-            
+
             // 给 LLVM 注入 cold 属性，优化分支预测
             if is_cold {
                 let kind_id = inkwell::attributes::Attribute::get_named_enum_kind_id("cold");
@@ -690,7 +692,7 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
 
         let val = self.compile_expr(value);
         self.builder.build_store(alloca, val).unwrap();
-        
+
         self.builder
             .build_load(union_llvm_ty.as_basic_type_enum(), alloca, "union_load")
             .unwrap()
@@ -704,7 +706,10 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     ) -> BasicValueEnum<'ctx> {
         let struct_llvm_ty = *self.structs.get(&adt_struct_id).unwrap();
 
-        let tag_llvm_ty = struct_llvm_ty.get_field_type_at_index(0).unwrap().into_int_type();
+        let tag_llvm_ty = struct_llvm_ty
+            .get_field_type_at_index(0)
+            .unwrap()
+            .into_int_type();
         let tag_val = tag_llvm_ty.const_int(tag_value as u64, false);
 
         let union_llvm_ty = struct_llvm_ty.get_field_type_at_index(1).unwrap();
@@ -722,8 +727,16 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             .unwrap();
 
         let mut adt_struct = struct_llvm_ty.const_zero();
-        adt_struct = self.builder.build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag").unwrap().into_struct_value();
-        adt_struct = self.builder.build_insert_value(adt_struct, union_val, 1, "adt_insert_union").unwrap().into_struct_value();
+        adt_struct = self
+            .builder
+            .build_insert_value(adt_struct, tag_val, 0, "adt_insert_tag")
+            .unwrap()
+            .into_struct_value();
+        adt_struct = self
+            .builder
+            .build_insert_value(adt_struct, union_val, 1, "adt_insert_union")
+            .unwrap()
+            .into_struct_value();
 
         adt_struct.into()
     }
@@ -1767,7 +1780,12 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
     //          Object File Generation
     // ==========================================
 
-    pub fn emit_to_file(&self, target_triple_str: &str, output_path: &str, opt_level: OptLevel) -> Result<(), String> {
+    pub fn emit_to_file(
+        &self,
+        target_triple_str: &str,
+        output_path: &str,
+        opt_level: OptLevel,
+    ) -> Result<(), String> {
         // 1. 初始化所有的 LLVM Target (x86, ARM, RISCV 等)
         Target::initialize_all(&InitializationConfig::default());
 
@@ -1788,9 +1806,9 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         let target_machine = target
             .create_target_machine(
                 &triple,
-                "generic",                           // CPU 类型
-                "",                                  // 特性
-                llvm_opt_level, 
+                "generic", // CPU 类型
+                "",        // 特性
+                llvm_opt_level,
                 RelocMode::Default,
                 CodeModel::Default,
             )

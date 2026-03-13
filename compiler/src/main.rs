@@ -82,10 +82,15 @@ fn parse_args() -> CompileOptions {
                 });
                 let parts: Vec<&str> = define_str.splitn(2, '=').collect();
                 if parts.len() != 2 {
-                    eprintln!("Error: Invalid define format `{}`. Expected `key=value`.", define_str);
+                    eprintln!(
+                        "Error: Invalid define format `{}`. Expected `key=value`.",
+                        define_str
+                    );
                     process::exit(1);
                 }
-                options.custom_defines.insert(parts[0].to_string(), parts[1].to_string());
+                options
+                    .custom_defines
+                    .insert(parts[0].to_string(), parts[1].to_string());
             }
             _ => {
                 if arg.starts_with('-') {

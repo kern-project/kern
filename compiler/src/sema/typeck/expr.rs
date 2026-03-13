@@ -442,7 +442,7 @@ impl<'a> ExprChecker<'a> {
         let then_ty = self.check_expr(then_branch, expected_ty);
         if let Some(else_expr) = else_branch {
             let else_ty = self.check_expr(else_expr, expected_ty);
-            
+
             // 如果有一边发散(NEVER)，类型以另一边为准
             if then_ty == TypeId::NEVER {
                 return else_ty;
@@ -1063,13 +1063,13 @@ impl<'a> ExprChecker<'a> {
 
         // 1. 允许指针视角转换 (例如 *i32 as *u8)
         if is_f_ptr && is_t_ptr {
-            return; 
+            return;
         }
 
         // 2. 允许指针和 usize 互转 (用于底层地址算术和 0 as *T)
         // 在 Kern 中，字面量 0 默认推导为 usize，所以 `0 as *i32` 是完全合法的
         if (is_f_ptr && t_norm == TypeId::USIZE) || (f_norm == TypeId::USIZE && is_t_ptr) {
-            return; 
+            return;
         }
 
         // 3. 严禁纯数字之间的 as 转换
@@ -1085,11 +1085,15 @@ impl<'a> ExprChecker<'a> {
         // 4. 兜底报错
         let from_str = self.ctx.ty_to_string(from);
         let to_str = self.ctx.ty_to_string(to);
-        self.ctx.struct_error(span, "invalid `as` cast")
+        self.ctx
+            .struct_error(span, "invalid `as` cast")
             .with_hint("`as` is strictly limited to pointer casts and pointer-to-usize conversions")
             .with_hint("for trait objects, use explicit constructor syntax: `Trait.{ ptr }`")
             .with_hint("for strings/slices to pointers, use explicit indexing: `slice.[0].&`")
-            .with_hint(format!("attempted to cast from `{}` to `{}`", from_str, to_str))
+            .with_hint(format!(
+                "attempted to cast from `{}` to `{}`",
+                from_str, to_str
+            ))
             .emit();
     }
 

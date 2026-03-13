@@ -51,15 +51,23 @@ impl<'a> Lexer<'a> {
 
             b'.' => {
                 if self.match_char(b'.') {
-                    if self.match_char(b'.') { return self.make_token(TokenType::Ellipsis); }
-                    else if self.match_char(b'=') { return self.make_token(TokenType::DotDotEqual); }
+                    if self.match_char(b'.') {
+                        return self.make_token(TokenType::Ellipsis);
+                    } else if self.match_char(b'=') {
+                        return self.make_token(TokenType::DotDotEqual);
+                    }
                     return self.make_token(TokenType::DotDot);
+                } else if self.match_char(b'*') {
+                    return self.make_token(TokenType::DotStar);
+                } else if self.match_char(b'&') {
+                    return self.make_token(TokenType::DotAmpersand);
+                } else if self.match_char(b'[') {
+                    return self.make_token(TokenType::DotLBracket);
+                } else if self.match_char(b'{') {
+                    return self.make_token(TokenType::DotLBrace);
+                } else {
+                    return self.make_token(TokenType::Dot);
                 }
-                else if self.match_char(b'*') { return self.make_token(TokenType::DotStar); }
-                else if self.match_char(b'&') { return self.make_token(TokenType::DotAmpersand); }
-                else if self.match_char(b'[') { return self.make_token(TokenType::DotLBracket); }
-                else if self.match_char(b'{') { return self.make_token(TokenType::DotLBrace); }
-                else { return self.make_token(TokenType::Dot); }
             }
 
             b'+' => self.match_assign(TokenType::Plus, TokenType::PlusAssign),
@@ -76,28 +84,43 @@ impl<'a> Lexer<'a> {
             }
 
             b'=' => {
-                if self.match_char(b'=') { self.make_token(TokenType::EqualEqual) } 
-                else if self.match_char(b'>') { self.make_token(TokenType::Arrow) } 
-                else { self.make_token(TokenType::Assign) }
+                if self.match_char(b'=') {
+                    self.make_token(TokenType::EqualEqual)
+                } else if self.match_char(b'>') {
+                    self.make_token(TokenType::Arrow)
+                } else {
+                    self.make_token(TokenType::Assign)
+                }
             }
             b'!' => {
-                if self.match_char(b'=') { self.make_token(TokenType::NotEqual) } 
-                else { self.make_token(TokenType::Bang) }
+                if self.match_char(b'=') {
+                    self.make_token(TokenType::NotEqual)
+                } else {
+                    self.make_token(TokenType::Bang)
+                }
             }
             b'<' => {
                 if self.match_char(b'<') {
-                    if self.match_char(b'=') { return self.make_token(TokenType::LShiftAssign); }
+                    if self.match_char(b'=') {
+                        return self.make_token(TokenType::LShiftAssign);
+                    }
                     return self.make_token(TokenType::LShift);
                 }
-                if self.match_char(b'=') { return self.make_token(TokenType::LessEqual); }
+                if self.match_char(b'=') {
+                    return self.make_token(TokenType::LessEqual);
+                }
                 self.make_token(TokenType::LessThan)
             }
             b'>' => {
                 if self.match_char(b'>') {
-                    if self.match_char(b'=') { return self.make_token(TokenType::RShiftAssign); }
+                    if self.match_char(b'=') {
+                        return self.make_token(TokenType::RShiftAssign);
+                    }
                     return self.make_token(TokenType::RShift);
                 }
-                if self.match_char(b'=') { return self.make_token(TokenType::GreaterEqual); }
+                if self.match_char(b'=') {
+                    return self.make_token(TokenType::GreaterEqual);
+                }
                 self.make_token(TokenType::GreaterThan)
             }
 
@@ -404,7 +427,7 @@ impl<'a> Lexer<'a> {
                         self.skip_comment_block();
                     } else {
                         // 只是一个普通的除号，退出跳过逻辑，交由 next() 处理
-                        break; 
+                        break;
                     }
                 }
                 _ => break,

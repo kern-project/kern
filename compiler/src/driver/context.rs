@@ -3,8 +3,8 @@ use super::CompileOptions;
 use super::config::TargetMachine;
 use super::diagnostic::{Diagnostic, DiagnosticLevel};
 use crate::parser::ast::NodeId;
-use crate::sema::*;
 use crate::sema::ty::TypeFormatter;
+use crate::sema::*;
 use crate::utils::*;
 
 use std::collections::HashMap;
@@ -127,25 +127,43 @@ impl Context {
         };
 
         let (bold_start, reset, prefix, color_eq) = if self.use_color {
-            ("\x1b[1m", "\x1b[0m", diag.level.color_prefix(), "\x1b[36;1m")
+            (
+                "\x1b[1m",
+                "\x1b[0m",
+                diag.level.color_prefix(),
+                "\x1b[36;1m",
+            )
         } else {
             ("", "", "", "")
         };
 
         eprintln!(
             "{}{}:{}:{}: {}{} {}{}",
-            bold_start, filename, line, col, prefix, diag.level.name(), diag.message, reset
+            bold_start,
+            filename,
+            line,
+            col,
+            prefix,
+            diag.level.name(),
+            diag.message,
+            reset
         );
 
         self.print_source_snippet(diag.primary_span, diag.level);
 
-       for (rel_span, rel_label) in &diag.related_spans {
-            eprintln!("   {}={} {}note:{} {}", color_eq, reset, bold_start, reset, rel_label);
+        for (rel_span, rel_label) in &diag.related_spans {
+            eprintln!(
+                "   {}={} {}note:{} {}",
+                color_eq, reset, bold_start, reset, rel_label
+            );
             self.print_source_snippet(*rel_span, DiagnosticLevel::Note);
         }
 
         for hint in &diag.hints {
-            eprintln!("   {}={} {}help:{} {}", color_eq, reset, bold_start, reset, hint);
+            eprintln!(
+                "   {}={} {}help:{} {}",
+                color_eq, reset, bold_start, reset, hint
+            );
         }
         eprintln!();
     }
@@ -164,14 +182,19 @@ impl Context {
                 let text_len = line_text.trim_end().len();
                 let col_offset = loc.col.saturating_sub(1);
                 let max_possible_carets = text_len.saturating_sub(col_offset);
-                
+
                 let raw_span_len = span.end.saturating_sub(span.start);
                 let print_len = std::cmp::max(1, std::cmp::min(raw_span_len, max_possible_carets));
-                
+
                 let carets = "^".repeat(print_len);
 
                 if self.use_color {
-                    eprintln!("{}{}{}\x1b[0m", " ".repeat(col_offset), level.color_prefix(), carets);
+                    eprintln!(
+                        "{}{}{}\x1b[0m",
+                        " ".repeat(col_offset),
+                        level.color_prefix(),
+                        carets
+                    );
                 } else {
                     eprintln!("{}{}", " ".repeat(col_offset), carets);
                 }
@@ -199,7 +222,10 @@ pub struct DiagnosticBuilder<'a> {
 
 impl<'a> DiagnosticBuilder<'a> {
     pub fn new(ctx: &'a mut Context, level: DiagnosticLevel, span: Span, msg: String) -> Self {
-        Self { ctx, diag: Diagnostic::new(level, span, msg) }
+        Self {
+            ctx,
+            diag: Diagnostic::new(level, span, msg),
+        }
     }
 
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {

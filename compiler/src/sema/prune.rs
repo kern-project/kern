@@ -71,7 +71,11 @@ impl<'a> Pruner<'a> {
             }
 
             // 递归遍历所有包含子表达式的结构
-            ExprKind::If { cond, then_branch, else_branch } => {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 self.prune_expr(cond);
                 self.prune_expr(then_branch);
                 if let Some(e) = else_branch {
@@ -84,7 +88,11 @@ impl<'a> Pruner<'a> {
                     self.prune_expr(&mut arm.body);
                 }
             }
-            ExprKind::Switch { target, cases, default_case } => {
+            ExprKind::Switch {
+                target,
+                cases,
+                default_case,
+            } => {
                 self.prune_expr(target);
                 for case in cases {
                     self.prune_expr(&mut case.body);
@@ -93,10 +101,21 @@ impl<'a> Pruner<'a> {
                     self.prune_expr(d);
                 }
             }
-            ExprKind::For { init, cond, post, body } => {
-                if let Some(e) = init { self.prune_expr(e); }
-                if let Some(e) = cond { self.prune_expr(e); }
-                if let Some(e) = post { self.prune_expr(e); }
+            ExprKind::For {
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                if let Some(e) = init {
+                    self.prune_expr(e);
+                }
+                if let Some(e) = cond {
+                    self.prune_expr(e);
+                }
+                if let Some(e) = post {
+                    self.prune_expr(e);
+                }
                 self.prune_expr(body);
             }
             ExprKind::Lambda { body, .. } => self.prune_expr(body),
@@ -113,14 +132,20 @@ impl<'a> Pruner<'a> {
             }
             ExprKind::Call { callee, args } => {
                 self.prune_expr(callee);
-                for arg in args { self.prune_expr(arg); }
+                for arg in args {
+                    self.prune_expr(arg);
+                }
             }
             ExprKind::DataInit { literal, .. } => match literal {
                 DataLiteralKind::Struct(fields) => {
-                    for f in fields { self.prune_expr(&mut f.value); }
+                    for f in fields {
+                        self.prune_expr(&mut f.value);
+                    }
                 }
                 DataLiteralKind::Array(elems) => {
-                    for e in elems { self.prune_expr(e); }
+                    for e in elems {
+                        self.prune_expr(e);
+                    }
                 }
                 DataLiteralKind::Repeat { value, count } => {
                     self.prune_expr(value);
@@ -128,10 +153,16 @@ impl<'a> Pruner<'a> {
                 }
                 DataLiteralKind::Scalar(val) => self.prune_expr(val),
             },
-            ExprKind::SliceOp { lhs, start, end, .. } => {
+            ExprKind::SliceOp {
+                lhs, start, end, ..
+            } => {
                 self.prune_expr(lhs);
-                if let Some(s) = start { self.prune_expr(s); }
-                if let Some(e) = end { self.prune_expr(e); }
+                if let Some(s) = start {
+                    self.prune_expr(s);
+                }
+                if let Some(e) = end {
+                    self.prune_expr(e);
+                }
             }
             ExprKind::Defer { expr: e } => self.prune_expr(e),
             ExprKind::Return(Some(e)) => self.prune_expr(e),

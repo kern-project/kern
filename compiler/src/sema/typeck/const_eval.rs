@@ -369,7 +369,7 @@ impl<'a> ConstEvaluator<'a> {
             TypeKind::Slice(_) | TypeKind::TraitObject(..) => self.ctx.target.pointer_size,
             TypeKind::Mut(inner) => self.compute_type_align_inner(inner, depth + 1),
             TypeKind::Array { elem, .. } => self.compute_type_align_inner(elem, depth + 1),
-            
+
             TypeKind::Def(def_id, generic_args) => {
                 self.compute_def_align(def_id, &generic_args, depth)
             }
@@ -398,7 +398,7 @@ impl<'a> ConstEvaluator<'a> {
             TypeKind::Slice(_) | TypeKind::TraitObject(..) => self.ctx.target.pointer_size * 2,
             TypeKind::Mut(inner) => self.compute_type_size_inner(inner, depth + 1),
             TypeKind::Array { elem, len } => self.compute_type_size_inner(elem, depth + 1) * len,
-            
+
             TypeKind::Def(def_id, generic_args) => {
                 self.compute_def_size(def_id, &generic_args, depth)
             }

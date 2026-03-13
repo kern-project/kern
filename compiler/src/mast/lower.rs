@@ -2114,14 +2114,16 @@ impl<'a> Lowerer<'a> {
                         );
 
                         // 再从 Union 中通过字段索引提取具体的 Payload
-                        let target_union_id = *self.adt_union_map.get(&mono_id)
+                        let target_union_id = *self
+                            .adt_union_map
+                            .get(&mono_id)
                             .expect("Kern ICE: Missing ADT to Union mapping");
 
                         let payload_extract = MastExpr::new(
                             conc_payload_ty,
                             MastExprKind::FieldAccess {
                                 lhs: Box::new(union_access),
-                                struct_id: target_union_id, 
+                                struct_id: target_union_id,
                                 field_idx: tag_idx,
                             },
                             arm.span,
@@ -2200,9 +2202,12 @@ impl<'a> Lowerer<'a> {
     /// 专门处理 Break 和 Continue 的 Defer 展开
     fn lower_jump(&mut self, jump_kind: MastExprKind, span: Span) -> MastExprKind {
         let mut defer_stmts = Vec::new();
-        
+
         // 获取当前所属循环的起始栈深度
-        let boundary = *self.loop_frames.last().expect("Kern Sema failed to catch jump outside of loop");
+        let boundary = *self
+            .loop_frames
+            .last()
+            .expect("Kern Sema failed to catch jump outside of loop");
 
         // 从当前栈顶一路向下倒序提取 defer，直到达到循环的边界
         for stack in self.defer_stack[boundary..].iter().rev() {

@@ -131,10 +131,14 @@ pub enum TypeKind {
     },
 
     /// 指针: `*T`, `*mut T`
-    Pointer { elem: Box<TypeNode> },
+    Pointer {
+        elem: Box<TypeNode>,
+    },
 
     /// 易失指针: `^T`, `^mut T`
-    VolatilePtr { elem: Box<TypeNode> },
+    VolatilePtr {
+        elem: Box<TypeNode>,
+    },
 
     /// 数组: `[N]T`
     Array {
@@ -146,7 +150,9 @@ pub enum TypeKind {
     ArrayInfer(Box<TypeNode>),
 
     /// 切片: `[]T`
-    Slice { elem: Box<TypeNode> },
+    Slice {
+        elem: Box<TypeNode>,
+    },
 
     /// 可变类型修饰符 `mut T`
     Mut(Box<TypeNode>),
@@ -160,10 +166,14 @@ pub enum TypeKind {
 
     // === 匿名/内联类型定义 (Structural Types) ===
     /// 结构体定义
-    Struct { fields: Vec<StructFieldDef> },
+    Struct {
+        fields: Vec<StructFieldDef>,
+    },
 
     /// 联合体定义
-    Union { fields: Vec<StructFieldDef> },
+    Union {
+        fields: Vec<StructFieldDef>,
+    },
 
     /// 枚举定义
     Enum {
@@ -172,11 +182,15 @@ pub enum TypeKind {
     },
 
     /// 特征定义 (Trait)
-    Trait { fields: Vec<StructFieldDef> },
+    Trait {
+        fields: Vec<StructFieldDef>,
+    },
 
     /// 代数数据类型定义 (Algebraic Data Type)
     /// 例如: adt { Some: T, None }
-    Adt { variants: Vec<AdtVariant> },
+    Adt {
+        variants: Vec<AdtVariant>,
+    },
 
     /// 推导占位符 `_`
     Infer,

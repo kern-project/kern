@@ -386,7 +386,11 @@ impl<'a> TypeResolver<'a> {
                     self.resolve_expr(r, scope);
                 }
             }
-            ast::ExprKind::If { cond, then_branch, else_branch } => {
+            ast::ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 self.resolve_expr(cond, scope);
                 self.resolve_expr(then_branch, scope);
                 if let Some(e) = else_branch {
@@ -397,13 +401,21 @@ impl<'a> TypeResolver<'a> {
                 self.resolve_expr(target, scope);
                 for arm in arms {
                     // 捕获 Match 分支中可能携带的显式类型前缀 (e.g., Result[i32].Ok)
-                    if let ast::MatchPattern::Variant { target_type: Some(ty), .. } = &arm.pattern {
+                    if let ast::MatchPattern::Variant {
+                        target_type: Some(ty),
+                        ..
+                    } = &arm.pattern
+                    {
                         self.resolve_type(ty, scope);
                     }
                     self.resolve_expr(&arm.body, scope);
                 }
             }
-            ast::ExprKind::Switch { target, cases, default_case } => {
+            ast::ExprKind::Switch {
+                target,
+                cases,
+                default_case,
+            } => {
                 self.resolve_expr(target, scope);
                 for case in cases {
                     // 遍历 Switch 的 Pattern (可能包含 Range 表达式)
@@ -422,13 +434,28 @@ impl<'a> TypeResolver<'a> {
                     self.resolve_expr(d, scope);
                 }
             }
-            ast::ExprKind::For { init, cond, post, body } => {
-                if let Some(e) = init { self.resolve_expr(e, scope); }
-                if let Some(e) = cond { self.resolve_expr(e, scope); }
-                if let Some(e) = post { self.resolve_expr(e, scope); }
+            ast::ExprKind::For {
+                init,
+                cond,
+                post,
+                body,
+            } => {
+                if let Some(e) = init {
+                    self.resolve_expr(e, scope);
+                }
+                if let Some(e) = cond {
+                    self.resolve_expr(e, scope);
+                }
+                if let Some(e) = post {
+                    self.resolve_expr(e, scope);
+                }
                 self.resolve_expr(body, scope);
             }
-            ast::ExprKind::Lambda { params, ret_type, body } => {
+            ast::ExprKind::Lambda {
+                params,
+                ret_type,
+                body,
+            } => {
                 // 捕获 Lambda 的参数类型和返回值类型
                 for param in params {
                     self.resolve_type(&param.type_node, scope);
@@ -470,10 +497,14 @@ impl<'a> TypeResolver<'a> {
                 }
                 match literal {
                     ast::DataLiteralKind::Struct(fields) => {
-                        for f in fields { self.resolve_expr(&f.value, scope); }
+                        for f in fields {
+                            self.resolve_expr(&f.value, scope);
+                        }
                     }
                     ast::DataLiteralKind::Array(elems) => {
-                        for e in elems { self.resolve_expr(e, scope); }
+                        for e in elems {
+                            self.resolve_expr(e, scope);
+                        }
                     }
                     ast::DataLiteralKind::Repeat { value, count } => {
                         self.resolve_expr(value, scope);
@@ -484,10 +515,16 @@ impl<'a> TypeResolver<'a> {
                     }
                 }
             }
-            ast::ExprKind::SliceOp { lhs, start, end, .. } => {
+            ast::ExprKind::SliceOp {
+                lhs, start, end, ..
+            } => {
                 self.resolve_expr(lhs, scope);
-                if let Some(s) = start { self.resolve_expr(s, scope); }
-                if let Some(e) = end { self.resolve_expr(e, scope); }
+                if let Some(s) = start {
+                    self.resolve_expr(s, scope);
+                }
+                if let Some(e) = end {
+                    self.resolve_expr(e, scope);
+                }
             }
             ast::ExprKind::Defer { expr: e } => self.resolve_expr(e, scope),
             ast::ExprKind::Return(Some(e)) => self.resolve_expr(e, scope),
@@ -672,8 +709,8 @@ impl<'a> TypeResolver<'a> {
             "usize" => Some(TypeId::USIZE),
             "f32" => Some(TypeId::F32),
             "f64" => Some(TypeId::F64),
-            "str" => Some(TypeId::STR),   
-            "never" => Some(TypeId::NEVER), 
+            "str" => Some(TypeId::STR),
+            "never" => Some(TypeId::NEVER),
             _ => None,
         }
     }
