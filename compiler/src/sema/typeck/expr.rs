@@ -1341,7 +1341,7 @@ impl<'a> ExprChecker<'a> {
             field_ty = subst.substitute(field_ty);
         }
 
-        // 🌟 Mut 传染机制：如果外层实例是 mut 的，那么它的字段默认也被标记为 mut
+        // Mut 传染机制：如果外层实例是 mut 的，那么它的字段默认也被标记为 mut
         if is_target_mut {
             field_ty = self.ctx.type_registry.intern(TypeKind::Mut(field_ty));
         }

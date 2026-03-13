@@ -472,7 +472,7 @@ pub fn outb_and_read(port: u16, data: u8) u8 {
 
 ## 12. AST Attributes and Metadata (`#[...]` and `#![...]`)
 
-Kern completely rejects traditional C-style preprocessor macros, substituting them with an **Attribute Mini-Language**.
+Kern completely rejects traditional C-style preprocessor macros, substituting them with an **Attribute Mini-Language**. Attributes are strictly parsed by the frontend and natively understood by the compiler backend to control memory layout, linkage, and optimization.
 
 ### 12.1 Scope: Outer vs. Inner Attributes
 
@@ -481,51 +481,74 @@ Kern completely rejects traditional C-style preprocessor macros, substituting th
 
 ### 12.2 Mutually Exclusive Content
 
-Kern strictly enforces single-responsibility for attribute brackets. The content inside the brackets `[...]` must be **either** a condition evaluator **or** a list of metadata tags. They cannot be mixed within the same bracket pair, though multiple brackets can be stacked on a single node.
+Kern strictly enforces single-responsibility for attribute brackets. The content inside the brackets `[...]` must be **either** a condition evaluator **or** a list of metadata tags.
 
-1. **Condition Pruning (`if(...)`)**: Uses a strict boolean evaluator. If the condition evaluates to `false`, the target node (or file) is entirely pruned from compilation. It supports logical operators (`and`, `or`, `not`) and short-circuits.
-2. **Metadata Tags**: A comma-separated list of tags attached to the AST for compiler side-effects (e.g., `cold`, `export_name("...")`, `packed`).
+#### 1. Conditional Compilation (`if(...)`)
+
+Uses a strict boolean evaluator at compile-time. If the condition evaluates to `false`, the target node (or file) is entirely pruned before semantic analysis. It supports logical operators (`and`, `or`, `not`) and checking custom compiler flags (`-D key=value`).
 
 ```kern
-// File-level condition: If 'hahaha' evaluates to false, the entire file/module is skipped.
-#![if(hahaha)]
-
-// Node-level condition: Prunes the specific function if the OS isn't Linux or macOS.
-#[if(os == "linux" or os == "macos")]
-// Node-level metadata: Mutually exclusive from 'if' in the bracket, comma-separated.
-#[cold, export_name("_start")]
-extern fn _start() void {
-    let port = u16.{0x3F8};
-    let data = u8.{0x41};
-    let status = mut u8.{undef};
-
-    @asm(.{
-        asm: .{
-            "out dx, al",
-            "in al, dx"
-        },
-        outputs: .{ al: status.& }, 
-        inputs: .{ dx: port, al: data },
-        clobbers: .{ "memory" },
-        volatile: true
-    });
-}
+#![if(os == "bare_metal")]
+#[if(not debug_mode)]
 
 ```
 
+#### 2. Metadata Tags
+
+A comma-separated list of tags attached to the AST for compiler side-effects. Metadata tags are grouped by their specific impact on the generated binary:
+
+**A. Linkage & FFI Control**
+
+* `export_name("...")`: Overrides the mangled name with a specific string for the linker.
+* `link_section("...")`: Forces a global variable or function into a specific ELF/Mach-O/COFF section (crucial for OS bootloaders, e.g., `#[link_section(".multiboot")]`).
+
+**B. Memory Layout**
+
+* `packed`: Removes all padding between struct/union fields. The size becomes exactly the sum of its fields, at the cost of potential unaligned memory access penalties.
+* `align(N)`: *(Planned)* Forces the alignment of a struct or static variable to `N` bytes (e.g., `#[align(4096)]` for page tables).
+
+**C. Optimization & Control Flow**
+
+* `cold`: Marks a function as rarely executed, moving it out of the hot instruction cache and optimizing branching.
+* `inline(always)` / `inline(never)`: *(Planned)* Overrides the LLVM inliner's heuristic.
+* `naked`: *(Planned)* Instructs the compiler to omit the standard function prologue and epilogue. Strictly used for hardware interrupt handlers and contextual context-switching alongside `@asm`.
+
+---
+
 ## 13. Compiler Intrinsics (`@...`)
 
-Intrinsics are special functions implemented directly within the Kern compiler backend (e.g., LLVM). They are prefixed with `@` to strictly separate them from user-defined functions. They are used for operations that alter data representation or cannot be safely expressed in pure Kern code.
+Intrinsics are special functions implemented directly within the Kern compiler backend (e.g., LLVM). They are prefixed with `@` to strictly separate them from user-defined functions. They are used for operations that alter data representation, query compile-time information, or emit specialized CPU instructions.
 
-### 13.1 Type Information and Casts
+### 13.1 Compile-Time Type Information
 
-* `@sizeof[T]() -> usize`: Compile-time memory footprint.
-* `@intCast[T: Integer, U: Integer](val: T) -> U`: Bit-width truncation or zero/sign-extension.
+These intrinsics are evaluated completely at compile-time and result in a constant `usize`.
+
+* `@sizeOf[T]() -> usize`: Returns the memory footprint (size in bytes) of type `T`.
+* `@alignOf[T]() -> usize`: Returns the ABI-required alignment (in bytes) of type `T`.
+
+### 13.2 Numeric Conversions
+
+Kern explicitly rejects using the `as` operator for data conversions that mutate the underlying bit representation (e.g., truncation or floating-point conversions).
+
+* `@intCast[T: Integer, U: Integer](val: T) -> U`: Bit-width truncation (e.g., `i32` to `u8`) or zero/sign-extension.
 * `@intToFloat[T: Integer, U: Float](val: T) -> U`
 * `@floatCast[T: Float, U: Float](val: T) -> U`
 * `@floatToInt[T: Float, U: Integer](val: T) -> U`
 
-### 13.2 Hardware and Control Flow (Planned)
+*(Note: Pointer-to-integer (`*T` to `usize`) and pointer-to-pointer (`*T` to `*U`) casts preserve the physical bit-pattern and are still performed using the `as` operator).*
 
-* `@popcount(val)` / `@clz(val)` / `@ctz(val)`
-* `@unreachable() -> !`: Informs the optimizer that a path is impossible (used to eliminate dead branches in hardware state handling).
+### 13.3 Hardware & Execution Control
+
+* `@unreachable() -> !`: Emits an unreachable instruction. Informs the optimizer that a control flow path is physically impossible, allowing it to eliminate dead branches (often used in exhaustiveness fallback).
+* `@trap() -> !`: *(Planned)* Emits an illegal instruction to deliberately crash/halt the program securely.
+* `@fence()`: *(Planned)* Emits a compiler memory fence to prevent instruction reordering around sensitive MMIO operations.
+
+*(Note: Kern does not provide `@volatileLoad` or `@volatileStore` intrinsics. Instead, Kern treats volatility as a first-class type qualifier (`^T` and `^mut T`). Hardware register accesses are performed via standard dereferencing `ptr.*` on a volatile pointer, yielding perfectly predictable code without intrinsic clutter.)*
+
+### 13.4 Bitwise Math (Planned)
+
+Mapped directly to single-cycle CPU instructions where available:
+
+* `@popCount(val)`: Returns the number of set bits (1s).
+* `@clz(val)`: Count leading zeros.
+* `@ctz(val)`: Count trailing zeros.

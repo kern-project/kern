@@ -1,5 +1,5 @@
+#![if(os == "linux" or os == "macos")]
 
-#[if(os == "linux" or os == "macos")]
 #[cold, export_name("_start")]
 extern fn _start() void {
     let port = u16.{0x3F8};
