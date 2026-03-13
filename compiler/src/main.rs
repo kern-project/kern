@@ -4,19 +4,25 @@ use std::env;
 use std::process;
 
 fn print_usage(program_name: &str) {
-    println!("Usage: {} [options] <input.kn>", program_name);
-    println!("Options:");
-    println!("  -o <file>      Write output to <file>");
-    println!("  -D <key=value>  Define a custom variable for conditional compilation");
-    println!("  --target <T>   Set target triple (e.g. x86_64-unknown-linux-gnu)");
-    println!("  -O0, -O1, -O2, -O3  Set optimization level");
-    println!("  --emit-llvm    Print LLVM IR to stdout");
-    println!("  --asm-dialect <intel|att> Set inline assembly dialect (default: intel)");
-    println!(
-        "  --freestanding Compile for a freestanding environment (do not link C runtime/libc)"
-    );
-    println!("  -v, --version  Display version information and exit");
-    println!("  -h, --help     Display this help and exit");
+    let version = env!("CARGO_PKG_VERSION");
+
+    println!("Kern Compiler v{}", version);
+    println!("Usage: {} [OPTIONS] <input.kn>\n", program_name);
+
+    println!("Build Options:");
+    println!("  -o <file>             Write output to <file>");
+    println!("  -D <key=val>          Define a variable for conditional compilation");
+    println!("  -O<0-3>               Set optimization level (default: O0)");
+
+    println!("\nTargeting & Codegen:");
+    println!("  --target <T>          Set target triple (e.g. x86_64-unknown-linux-gnu)");
+    println!("  --asm-dialect <D>     Set assembly dialect: intel (default) or att");
+    println!("  --freestanding        Do not link C runtime or standard libraries");
+    println!("  --emit-llvm           Print LLVM IR to stdout");
+
+    println!("\nInformation:");
+    println!("  -v, --version         Display version information and exit");
+    println!("  -h, --help            Display this help and exit");
 }
 
 fn parse_args() -> CompileOptions {
