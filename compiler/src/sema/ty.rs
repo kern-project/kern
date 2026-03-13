@@ -1,6 +1,5 @@
-#![allow(unused)]
-use crate::parser::ast::NodeId;
 use crate::utils::SymbolId;
+use crate::driver::Context;
 use std::collections::HashMap;
 
 /// 类型的唯一 ID (轻量级 Handle)
@@ -27,8 +26,9 @@ impl TypeId {
     pub const USIZE: Self = Self(15);
     // 字符串字面量类型 (只读切片)
     pub const STR: Self = Self(16);
+    pub const NEVER: Self = Self(17);
     // 错误占位符 (防止级联报错)
-    pub const ERROR: Self = Self(17);
+    pub const ERROR: Self = Self(18);
 }
 
 /// 类型的具体结构
@@ -121,6 +121,7 @@ pub enum PrimitiveType {
     F32,
     F64,
     Str, // 内部使用的字符串字面量类型
+    Never,
 }
 
 /// 定义 ID (指向 struct/enum/union/trait 的声明)
@@ -165,8 +166,9 @@ impl TypeRegistry {
         self.add_primitive(PrimitiveType::ISize); // 14
         self.add_primitive(PrimitiveType::USize); // 15
         self.add_primitive(PrimitiveType::Str); // 16
+        self.add_primitive(PrimitiveType::Never); // 17
 
-        // 17: Error
+        // 18: Error
         self.types.push(TypeKind::Error);
     }
 
@@ -262,6 +264,98 @@ impl TypeRegistry {
             TypeKind::ArrayInfer(elem) => Some(*elem),
             TypeKind::Mut(inner) => self.get_elem_type(*inner), // 穿透 Mut 找元素
             _ => None,
+        }
+    }
+}
+
+pub struct TypeFormatter<'a> {
+    pub ctx: &'a Context,
+}
+
+impl<'a> TypeFormatter<'a> {
+    pub fn format(&self, ty: TypeId) -> String {
+        let kind = self.ctx.type_registry.get(ty);
+        match kind {
+            TypeKind::Primitive(p) => match p {
+                PrimitiveType::Void => "void".to_string(),
+                PrimitiveType::Bool => "bool".to_string(),
+                PrimitiveType::I8 => "i8".to_string(),
+                PrimitiveType::I16 => "i16".to_string(),
+                PrimitiveType::I32 => "i32".to_string(),
+                PrimitiveType::I64 => "i64".to_string(),
+                PrimitiveType::I128 => "i128".to_string(),
+                PrimitiveType::ISize => "isize".to_string(),
+                PrimitiveType::U8 => "u8".to_string(),
+                PrimitiveType::U16 => "u16".to_string(),
+                PrimitiveType::U32 => "u32".to_string(),
+                PrimitiveType::U64 => "u64".to_string(),
+                PrimitiveType::U128 => "u128".to_string(),
+                PrimitiveType::USize => "usize".to_string(),
+                PrimitiveType::F32 => "f32".to_string(),
+                PrimitiveType::F64 => "f64".to_string(),
+                PrimitiveType::Str => "str".to_string(),
+                PrimitiveType::Never => "!".to_string(),
+            },
+            TypeKind::Pointer(elem) => format!("*{}", self.format(*elem)),
+            TypeKind::VolatilePtr(elem) => format!("^{}", self.format(*elem)),
+            TypeKind::Slice(elem) => format!("[]{}", self.format(*elem)),
+            TypeKind::Array { elem, len } => format!("[{}]{}", len, self.format(*elem)),
+            TypeKind::ArrayInfer(elem) => format!("[_]{}", self.format(*elem)),
+            TypeKind::Mut(inner) => format!("mut {}", self.format(*inner)),
+
+            TypeKind::Def(def_id, generics)
+            | TypeKind::TraitObject(def_id, generics)
+            | TypeKind::Adt(def_id, generics) => {
+                let def = &self.ctx.defs[def_id.0 as usize];
+                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                if generics.is_empty() {
+                    name.to_string()
+                } else {
+                    let gen_strs: Vec<String> = generics.iter().map(|g| self.format(*g)).collect();
+                    format!("{}[{}]", name, gen_strs.join(", "))
+                }
+            }
+
+            TypeKind::AdtPayload(def_id, generics) => {
+                let def = &self.ctx.defs[def_id.0 as usize];
+                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                if generics.is_empty() {
+                    format!("{}::Payload", name)
+                } else {
+                    let gen_strs: Vec<String> = generics.iter().map(|g| self.format(*g)).collect();
+                    format!("{}::Payload[{}]", name, gen_strs.join(", "))
+                }
+            }
+
+            TypeKind::Alias(sym, _) => self.ctx.resolve(*sym).to_string(),
+            TypeKind::Param(sym) => self.ctx.resolve(*sym).to_string(),
+
+            TypeKind::Function { params, ret, is_variadic } => {
+                let mut param_strs: Vec<String> = params.iter().map(|p| self.format(*p)).collect();
+                if *is_variadic {
+                    param_strs.push("...".to_string());
+                }
+                format!("fn({}) {}", param_strs.join(", "), self.format(*ret))
+            }
+
+            TypeKind::FnDef(def_id, generics) => {
+                let def = &self.ctx.defs[def_id.0 as usize];
+                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous fn>");
+                if generics.is_empty() {
+                    format!("fn item `{}`", name)
+                } else {
+                    let gen_strs: Vec<String> = generics.iter().map(|g| self.format(*g)).collect();
+                    format!("fn item `{}[{}]`", name, gen_strs.join(", "))
+                }
+            }
+
+            TypeKind::Module(def_id) => {
+                let def = &self.ctx.defs[def_id.0 as usize];
+                let name = def.name().map(|sym| self.ctx.resolve(sym)).unwrap_or("<anonymous>");
+                format!("module `{}`", name)
+            }
+
+            TypeKind::Error => "{error}".to_string(),
         }
     }
 }

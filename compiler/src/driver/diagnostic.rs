@@ -5,17 +5,27 @@ pub enum DiagnosticLevel {
     Error,
     Warning,
     Note,
-    Ice, // Internal Compiler Error (编译器内部错误)
+    Ice, // Internal Compiler Error
 }
 
 impl DiagnosticLevel {
-    /// 获取带颜色的标签名称 (使用简单的 ANSI 转义码)
-    pub fn color_name(&self) -> &'static str {
+    /// 纯文本名称，用于日志重定向
+    pub fn name(&self) -> &'static str {
         match self {
-            DiagnosticLevel::Error => "\x1b[31;1merror\x1b[0m", // 红色粗体
-            DiagnosticLevel::Warning => "\x1b[33;1mwarning\x1b[0m", // 黄色粗体
-            DiagnosticLevel::Note => "\x1b[36;1mnote\x1b[0m",   // 青色粗体
-            DiagnosticLevel::Ice => "\x1b[35;1mICE\x1b[0m",     // 紫色粗体
+            DiagnosticLevel::Error => "error",
+            DiagnosticLevel::Warning => "warning",
+            DiagnosticLevel::Note => "note",
+            DiagnosticLevel::Ice => "ICE",
+        }
+    }
+
+    /// ANSI 颜色控制码前缀
+    pub fn color_prefix(&self) -> &'static str {
+        match self {
+            DiagnosticLevel::Error => "\x1b[31;1m",   // 红色粗体
+            DiagnosticLevel::Warning => "\x1b[33;1m", // 黄色粗体
+            DiagnosticLevel::Note => "\x1b[36;1m",    // 青色粗体
+            DiagnosticLevel::Ice => "\x1b[35;1m",     // 紫色粗体
         }
     }
 }
@@ -25,7 +35,7 @@ pub struct Diagnostic {
     pub level: DiagnosticLevel,
     pub primary_span: Span,
     pub message: String,
-    pub hints: Vec<String>, // 帮助信息，比如 "help: consider adding `mut`"
+    pub hints: Vec<String>,
     pub related_spans: Vec<(Span, String)>,
 }
 
