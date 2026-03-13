@@ -364,41 +364,35 @@ impl<'a> ConstEvaluator<'a> {
         Err(())
     }
 
-    fn eval_intrinsic_call(
-        &mut self,
-        callee: &Expr,
-        args: &[Expr],
-        depth: usize,
-        span: Span,
-    ) -> Result<ConstValue, ()> {
-        let callee_ty = self
-            .ctx
-            .node_types
-            .get(&callee.id)
-            .copied()
-            .unwrap_or(TypeId::ERROR);
+    fn eval_intrinsic_call(&mut self, callee: &Expr, args: &[Expr], depth: usize, span: Span) -> Result<ConstValue, ()> {
+        let callee_ty = self.ctx.node_types.get(&callee.id).copied().unwrap_or(TypeId::ERROR);
         let norm_callee = self.ctx.type_registry.normalize(callee_ty);
+
         let (def_id, generic_args) = match self.ctx.type_registry.get(norm_callee).clone() {
             TypeKind::FnDef(id, args) => (id, args),
             _ => {
-                self.ctx
-                    .struct_error(
-                        span,
-                        "function calls are not allowed in constant expressions",
-                    )
-                    .emit();
+                self.ctx.struct_error(span, "function calls are not allowed in constant expressions").emit();
                 return Err(());
             }
         };
-        let (is_intrinsic, fn_name_id) = if let Def::Function(f) = &self.ctx.defs[def_id.0 as usize]
-        {
-            (f.is_intrinsic, f.name)
+
+        let (is_intrinsic, fn_name_id, generics_len) = if let Def::Function(f) = &self.ctx.defs[def_id.0 as usize] {
+            (f.is_intrinsic, f.name, f.generics.len())
         } else {
             return Err(());
         };
 
         if is_intrinsic {
             let name_str = self.ctx.resolve(fn_name_id).to_string();
+
+            // 在 const 阶段，强制要求泛型参数被显式填满
+            if generic_args.len() != generics_len {
+                self.ctx.struct_error(span, format!("intrinsic `{}` requires explicit generic arguments in constant evaluation", name_str))
+                    .with_hint(format!("example: `{}[u32](...)`", name_str))
+                    .emit();
+                return Err(());
+            }
+
             match name_str.as_str() {
                 "@sizeOf" => {
                     if let Some(&target_ty) = generic_args.get(0) {
@@ -412,37 +406,18 @@ impl<'a> ConstEvaluator<'a> {
                         return Ok(ConstValue::Int(align as i128));
                     }
                 }
-                "@popCount" | "@clz" | "@ctz" | "@bswap" => {
-                    // 🌟 加入 @bswap
+                "@popCount" | "@clz" | "@ctz" => {
                     if let Ok(ConstValue::Int(val)) = self.eval_inner(&args[0], depth + 1) {
                         let target_ty = generic_args[0];
                         let bit_width = self.compute_type_size(target_ty) * 8;
-                        let mask = if bit_width == 128 {
-                            u128::MAX
-                        } else {
-                            (1 << bit_width) - 1
-                        };
+                        let mask = if bit_width == 128 { u128::MAX } else { (1 << bit_width) - 1 };
                         let u_val = (val as u128) & mask;
 
                         let res = match name_str.as_str() {
                             "@popCount" => u_val.count_ones() as i128,
                             "@clz" => (u_val.leading_zeros() as i128) - (128 - bit_width as i128),
-                            "@ctz" => {
-                                if u_val == 0 {
-                                    bit_width as i128
-                                } else {
-                                    u_val.trailing_zeros() as i128
-                                }
-                            }
-                            // 常量级的字节序翻转
-                            "@bswap" => match bit_width {
-                                16 => (u_val as u16).swap_bytes() as i128,
-                                32 => (u_val as u32).swap_bytes() as i128,
-                                64 => (u_val as u64).swap_bytes() as i128,
-                                128 => u_val.swap_bytes() as i128,
-                                _ => u_val as i128, // 8-bit doesn't swap
-                            },
-                            _ => unreachable!(),
+                            "@ctz" => if u_val == 0 { bit_width as i128 } else { u_val.trailing_zeros() as i128 },
+                            _ => unreachable!()
                         };
                         return Ok(ConstValue::Int(res));
                     }
@@ -451,66 +426,47 @@ impl<'a> ConstEvaluator<'a> {
                     if let Ok(ConstValue::Int(val)) = self.eval_inner(&args[0], depth + 1) {
                         let target_ty = generic_args[1];
                         let bit_width = self.compute_type_size(target_ty) * 8;
-                        let mask = if bit_width == 128 {
-                            u128::MAX
-                        } else {
-                            (1 << bit_width) - 1
-                        };
+                        let mask = if bit_width == 128 { u128::MAX } else { (1 << bit_width) - 1 };
                         let mut u_val = (val as u128) & mask;
-
-                        // 检查是否需要符号扩展
-                        let is_signed = matches!(
-                            self.ctx.type_registry.get(target_ty),
-                            TypeKind::Primitive(
-                                PrimitiveType::I8
-                                    | PrimitiveType::I16
-                                    | PrimitiveType::I32
-                                    | PrimitiveType::I64
-                                    | PrimitiveType::I128
-                                    | PrimitiveType::ISize
-                            )
-                        );
+                        
+                        let is_signed = matches!(self.ctx.type_registry.get(target_ty), TypeKind::Primitive(PrimitiveType::I8 | PrimitiveType::I16 | PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I128 | PrimitiveType::ISize));
                         if is_signed && bit_width < 128 && (u_val & (1 << (bit_width - 1))) != 0 {
                             u_val |= u128::MAX << bit_width;
                         }
                         return Ok(ConstValue::Int(u_val as i128));
                     }
                 }
+                "@bswap" => {
+                    if let Ok(ConstValue::Int(val)) = self.eval_inner(&args[0], depth + 1) {
+                        let target_ty = generic_args[0];
+                        let bit_width = self.compute_type_size(target_ty) * 8;
+                        let mask = if bit_width == 128 { u128::MAX } else { (1 << bit_width) - 1 };
+                        let u_val = (val as u128) & mask;
+
+                        let res = match bit_width {
+                            16 => (u_val as u16).swap_bytes() as i128,
+                            32 => (u_val as u32).swap_bytes() as i128,
+                            64 => (u_val as u64).swap_bytes() as i128,
+                            128 => u_val.swap_bytes() as i128,
+                            _ => u_val as i128,
+                        };
+                        return Ok(ConstValue::Int(res));
+                    }
+                }
                 "@memcpy" | "@memset" => {
-                    self.ctx
-                        .struct_error(
-                            span,
-                            format!(
-                                "memory intrinsic `{}` cannot be evaluated at compile time",
-                                name_str
-                            ),
-                        )
-                        .emit();
+                    self.ctx.struct_error(span, format!("memory intrinsic `{}` cannot be evaluated at compile time", name_str)).emit();
                     return Err(());
                 }
                 _ => {
-                    self.ctx
-                        .struct_error(
-                            span,
-                            format!(
-                                "intrinsic `{}` cannot be evaluated at compile time",
-                                name_str
-                            ),
-                        )
-                        .emit();
+                    self.ctx.struct_error(span, format!("intrinsic `{}` cannot be evaluated at compile time", name_str)).emit();
                     return Err(());
                 }
             }
         }
 
         self.ctx
-            .struct_error(
-                span,
-                "function calls are not allowed in constant expressions",
-            )
-            .with_hint(
-                "only compile-time intrinsics like `@sizeOf` or `@alignOf` are permitted here",
-            )
+            .struct_error(span, "function calls are not allowed in constant expressions")
+            .with_hint("only compile-time intrinsics like `@sizeOf` or `@clz` are permitted here")
             .emit();
         Err(())
     }
