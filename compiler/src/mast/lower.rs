@@ -406,8 +406,15 @@ impl<'a> Lowerer<'a> {
         });
 
         // 2. 构建外部的 Wrapper Struct (Tag + Union)
-        // TODO: 默认使用 u32 作为 Tag，足以应对百万级变体
-        let tag_ty = TypeId::U32;
+        // 动态获取并泛型替换 ADT 的 Tag 类型
+        let tag_ty = if let Some(bt) = &def.backing_type {
+            let raw_tag_ty = self.ctx.node_types.get(&bt.id).copied().unwrap_or(TypeId::U32);
+            let mut subst = Substituter::new(&mut self.ctx.type_registry, &subst_map);
+            subst.substitute(raw_tag_ty)
+        } else {
+            TypeId::U32 // 如果没有指定，默认退化为 u32
+        };
+
         let union_ty = self
             .ctx
             .type_registry

@@ -250,6 +250,17 @@ impl<'a> TypeResolver<'a> {
                 // 绑定泛型参数，比如 Option[T] 里的 T
                 self.bind_generics(&a.generics, adt_scope);
 
+                // 解析并严格校验 backing_type
+                if let Some(backing_ty) = &a.backing_type {
+                    let resolved_ty = self.resolve_type(backing_ty, adt_scope);
+                    if !self.ctx.type_registry.is_integer(resolved_ty)
+                        && resolved_ty != TypeId::ERROR
+                    {
+                        self.ctx
+                            .emit_error(backing_ty.span, "ADT backing type must be an integer");
+                    }
+                }
+
                 // 解析所有变体的负载类型
                 for variant in &a.variants {
                     if let Some(payload_ty) = &variant.payload_type {

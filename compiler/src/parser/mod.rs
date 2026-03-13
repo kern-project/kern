@@ -707,6 +707,11 @@ impl<'a> Parser<'a> {
 
     fn parse_adt_type(&mut self) -> ParseResult<TypeNode> {
         let start_token = self.advance(); // 消费 'adt'
+        // 解析可选的基础类型 (Backing Type)
+        let mut backing_type = None;
+        if self.match_token(&[TokenType::Colon]) {
+            backing_type = Some(Box::new(self.parse_type()?));
+        }
         self.expect(TokenType::LBrace)?;
 
         let mut variants = Vec::new();
@@ -742,7 +747,7 @@ impl<'a> Parser<'a> {
         Ok(TypeNode {
             id: self.new_id(),
             span: start_token.span.to(end_token.span),
-            kind: TypeKind::Adt { variants },
+            kind: TypeKind::Adt { backing_type, variants },
         })
     }
 }

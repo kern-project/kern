@@ -177,7 +177,7 @@ pub enum TypeKind {
 
     /// 枚举定义
     Enum {
-        backing_type: Option<Box<TypeNode>>, // enum : u8 { ... }
+        backing_type: Option<Box<TypeNode>>, // : u8 = enum { ... }
         variants: Vec<EnumVariant>,
     },
 
@@ -189,6 +189,7 @@ pub enum TypeKind {
     /// 代数数据类型定义 (Algebraic Data Type)
     /// 例如: adt { Some: T, None }
     Adt {
+        backing_type: Option<Box<TypeNode>>,
         variants: Vec<AdtVariant>,
     },
 

@@ -148,6 +148,7 @@ pub struct AdtDef {
     pub name: SymbolId,
     pub vis: Visibility,
     pub generics: Vec<ast::GenericParam>,
+    pub backing_type: Option<Box<ast::TypeNode>>,
     // 变体列表：记录变体名和可选的负载类型 (未 Resolve 的 AST 类型)
     pub variants: Vec<ast::AdtVariant>,
     pub span: Span,
