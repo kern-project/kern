@@ -51,6 +51,14 @@ impl<'a> BuiltinInjector<'a> {
         self.inject_int_cast(int_trait_id);
         self.inject_float_to_int(float_trait_id, int_trait_id);
         self.inject_unreachable();
+        self.inject_bitwise("@popCount", int_trait_id);
+        self.inject_bitwise("@clz", int_trait_id);
+        self.inject_bitwise("@ctz", int_trait_id);
+        self.inject_void_intrinsic("@trap", true);
+        self.inject_void_intrinsic("@fence", false);
+        self.inject_void_intrinsic("@breakpoint", false);
+        self.inject_memory_intrinsic("@memcpy", true);
+        self.inject_memory_intrinsic("@memset", false);
     }
 
     // ==========================================
@@ -711,5 +719,251 @@ impl<'a> BuiltinInjector<'a> {
             is_pub: true,
         };
         let _ = self.ctx.scopes.define(name_id, info);
+    }
+
+    fn inject_bitwise(&mut self, name: &str, int_trait_id: DefId) {
+        let name_id = self.ctx.intern(name);
+        let def_id = DefId(self.ctx.defs.len() as u32);
+
+        let trait_node = ast::TypeNode {
+            id: self.ctx.next_node_id(),
+            span: Default::default(),
+            kind: ast::TypeKind::Infer,
+        };
+        let trait_ty = self
+            .ctx
+            .type_registry
+            .intern(TypeKind::Def(int_trait_id, vec![]));
+        self.ctx.node_types.insert(trait_node.id, trait_ty);
+
+        let param_t = ast::GenericParam {
+            name: self.ctx.intern("T"),
+            constraints: vec![trait_node],
+            span: Default::default(),
+        };
+
+        let val_param_id = self.ctx.next_node_id();
+        let ret_id = self.ctx.next_node_id();
+
+        let sig_ty = {
+            let t_ty = self.ctx.type_registry.intern(TypeKind::Param(param_t.name));
+            self.ctx.node_types.insert(val_param_id, t_ty);
+            self.ctx.node_types.insert(ret_id, t_ty);
+            self.ctx.type_registry.intern(TypeKind::Function {
+                params: vec![t_ty],
+                ret: t_ty,
+                is_variadic: false,
+            })
+        };
+
+        let func_def = FunctionDef {
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
+            generics: vec![param_t],
+            params: vec![ast::FuncParam {
+                name: self.ctx.intern("val"),
+                type_node: ast::TypeNode {
+                    id: val_param_id,
+                    span: Default::default(),
+                    kind: ast::TypeKind::Infer,
+                },
+                span: Default::default(),
+            }],
+            ret_type: ast::TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast::TypeKind::Infer,
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
+            attributes: vec![],
+        };
+
+        self.ctx.add_def(Def::Function(func_def));
+        let root_scope = crate::sema::scope::ScopeId(0);
+        self.ctx.scopes.set_current_scope(root_scope);
+        let info = SymbolInfo {
+            kind: SymbolKind::Function,
+            node_id: self.ctx.next_node_id(),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
+            def_id: Some(def_id),
+            span: Default::default(),
+            is_pub: true,
+        };
+        let _ = self.ctx.scopes.define(name_id, info);
+    }
+
+    // 注入无需参数的硬件级指令 (is_divergent 决定返回 ! 还是 void)
+    fn inject_void_intrinsic(&mut self, name: &str, is_divergent: bool) {
+        let name_id = self.ctx.intern(name);
+        let def_id = DefId(self.ctx.defs.len() as u32);
+        let ret_id = self.ctx.next_node_id();
+
+        let ret_type = if is_divergent {
+            TypeId::NEVER
+        } else {
+            TypeId::VOID
+        };
+        let ast_ret_kind = if is_divergent {
+            ast::TypeKind::Never
+        } else {
+            ast::TypeKind::Infer
+        }; // void没有专属AST节点，用Infer代替，靠缓存命中
+
+        let sig_ty = {
+            self.ctx.node_types.insert(ret_id, ret_type);
+            self.ctx.type_registry.intern(TypeKind::Function {
+                params: vec![],
+                ret: ret_type,
+                is_variadic: false,
+            })
+        };
+
+        let func_def = FunctionDef {
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
+            generics: vec![],
+            params: vec![],
+            ret_type: ast::TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast_ret_kind,
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
+            attributes: vec![],
+        };
+
+        self.ctx.add_def(Def::Function(func_def));
+        let root_scope = crate::sema::scope::ScopeId(0);
+        self.ctx.scopes.set_current_scope(root_scope);
+        let info = SymbolInfo {
+            kind: SymbolKind::Function,
+            node_id: self.ctx.next_node_id(),
+            type_id: self
+                .ctx
+                .type_registry
+                .intern(TypeKind::FnDef(def_id, vec![])),
+            def_id: Some(def_id),
+            span: Default::default(),
+            is_pub: true,
+        };
+        let _ = self.ctx.scopes.define(name_id, info);
+    }
+
+    fn inject_memory_intrinsic(&mut self, name: &str, is_memcpy: bool) {
+        let name_id = self.ctx.intern(name);
+        let def_id = DefId(self.ctx.defs.len() as u32);
+
+        // 类型准备：dest: *mut u8, src: *u8, val: u8, len: usize
+        let type_u8 = self.ctx.type_registry.intern(TypeKind::Mut(TypeId::U8));
+        let ptr_mut_u8 = self.ctx.type_registry.intern(TypeKind::Pointer(type_u8));
+        let ptr_u8 = self.ctx.type_registry.intern(TypeKind::Pointer(TypeId::U8));
+
+        let param_dest_id = self.ctx.next_node_id();
+        let param_src_val_id = self.ctx.next_node_id();
+        let param_len_id = self.ctx.next_node_id();
+        let ret_id = self.ctx.next_node_id();
+
+        let sig_ty = {
+            self.ctx.node_types.insert(param_dest_id, ptr_mut_u8);
+            self.ctx.node_types.insert(
+                param_src_val_id,
+                if is_memcpy { ptr_u8 } else { TypeId::U8 },
+            );
+            self.ctx.node_types.insert(param_len_id, TypeId::USIZE);
+            self.ctx.node_types.insert(ret_id, TypeId::VOID);
+
+            self.ctx.type_registry.intern(TypeKind::Function {
+                params: vec![
+                    ptr_mut_u8,
+                    if is_memcpy { ptr_u8 } else { TypeId::U8 },
+                    TypeId::USIZE,
+                ],
+                ret: TypeId::VOID,
+                is_variadic: false,
+            })
+        };
+
+        let func_def = FunctionDef {
+            id: def_id,
+            name: name_id,
+            vis: Visibility::Public,
+            parent: None,
+            generics: vec![], // 内存函数不需要泛型，强制按字节(u8)操作
+            params: vec![
+                ast::FuncParam {
+                    name: self.ctx.intern("dest"),
+                    type_node: ast::TypeNode {
+                        id: param_dest_id,
+                        span: Default::default(),
+                        kind: ast::TypeKind::Infer,
+                    },
+                    span: Default::default(),
+                },
+                ast::FuncParam {
+                    name: self.ctx.intern(if is_memcpy { "src" } else { "val" }),
+                    type_node: ast::TypeNode {
+                        id: param_src_val_id,
+                        span: Default::default(),
+                        kind: ast::TypeKind::Infer,
+                    },
+                    span: Default::default(),
+                },
+                ast::FuncParam {
+                    name: self.ctx.intern("len"),
+                    type_node: ast::TypeNode {
+                        id: param_len_id,
+                        span: Default::default(),
+                        kind: ast::TypeKind::Infer,
+                    },
+                    span: Default::default(),
+                },
+            ],
+            ret_type: ast::TypeNode {
+                id: ret_id,
+                span: Default::default(),
+                kind: ast::TypeKind::Infer,
+            },
+            body: None,
+            is_extern: false,
+            is_variadic: false,
+            is_intrinsic: true,
+            resolved_sig: Some(sig_ty),
+            span: Default::default(),
+            attributes: vec![],
+        };
+
+        self.ctx.add_def(Def::Function(func_def));
+        let node_id = self.ctx.next_node_id();
+        let _ = self.ctx.scopes.define(
+            name_id,
+            SymbolInfo {
+                kind: SymbolKind::Function,
+                node_id,
+                type_id: self
+                    .ctx
+                    .type_registry
+                    .intern(TypeKind::FnDef(def_id, vec![])),
+                def_id: Some(def_id),
+                span: Default::default(),
+                is_pub: true,
+            },
+        );
     }
 }

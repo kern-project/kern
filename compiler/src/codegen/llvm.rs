@@ -319,9 +319,9 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     ast::MetaItem::Call(id, expr) => {
                         let name_str = (self.ctx_resolve)(*id);
                         if name_str == "export_name" {
-                        if let ast::ExprKind::String(s) = &expr.kind {
-                            llvm_symbol_name = s.clone();
-                        }
+                            if let ast::ExprKind::String(s) = &expr.kind {
+                                llvm_symbol_name = s.clone();
+                            }
                         } else if name_str == "link_section" {
                             if let ast::ExprKind::String(s) = &expr.kind {
                                 link_section = Some(s.clone());
@@ -398,8 +398,8 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     ast::MetaItem::Call(id, expr) => {
                         let name_str = (self.ctx_resolve)(*id);
                         if name_str == "export_name" {
-                        if let ast::ExprKind::String(s) = &expr.kind {
-                            llvm_symbol_name = s.clone();
+                            if let ast::ExprKind::String(s) = &expr.kind {
+                                llvm_symbol_name = s.clone();
                             }
                         } else if name_str == "link_section" {
                             if let ast::ExprKind::String(s) = &expr.kind {
@@ -410,10 +410,10 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                     ast::MetaItem::Marker(id) => {
                         let name_str = (self.ctx_resolve)(*id);
                         if name_str == "cold" {
-                        is_cold = true;
+                            is_cold = true;
                         } else if name_str == "naked" {
                             is_naked = true;
-                    }
+                        }
                     }
                 }
             }
@@ -655,6 +655,44 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             }
             // === 7. LLVM Inline Assembly ===
             MastExprKind::Asm(asm_block) => self.compile_inline_asm(asm_block),
+            MastExprKind::BitIntrinsic { kind, operand } => {
+                self.compile_bit_intrinsic(*kind, operand, expected_llvm_ty)
+            }
+            MastExprKind::Trap => {
+                let intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.trap").unwrap();
+                let decl = intrinsic.get_declaration(&self.module, &[]).unwrap();
+                self.builder.build_call(decl, &[], "trap").unwrap();
+                self.builder.build_unreachable().unwrap(); // LLVM trap 之后也是不可达的
+                self.get_undef_val(expected_llvm_ty)
+            }
+            MastExprKind::Breakpoint => {
+                let intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.debugtrap").unwrap();
+                let decl = intrinsic.get_declaration(&self.module, &[]).unwrap();
+                self.builder.build_call(decl, &[], "bkpt").unwrap();
+                self.context.i8_type().const_zero().into() // Void return
+            }
+            MastExprKind::Fence => {
+                // 生成严格的 Sequential Consistent 内存屏障
+                self.builder
+                    .build_fence(inkwell::AtomicOrdering::SequentiallyConsistent, 0, "mfence")
+                    .unwrap();
+                self.context.i8_type().const_zero().into() // Void return
+            }
+            MastExprKind::Memcpy { dest, src, len } => {
+                let d = self.compile_expr(dest).into_pointer_value();
+                let s = self.compile_expr(src).into_pointer_value();
+                let l = self.compile_expr(len).into_int_value();
+                // 1 表示按字节(u8)对齐，这是最安全的假设。高级优化会由LLVM后端处理。
+                self.builder.build_memcpy(d, 1, s, 1, l).unwrap();
+                self.context.i8_type().const_zero().into() // Void 返回
+            }
+            MastExprKind::Memset { dest, val, len } => {
+                let d = self.compile_expr(dest).into_pointer_value();
+                let v = self.compile_expr(val).into_int_value();
+                let l = self.compile_expr(len).into_int_value();
+                self.builder.build_memset(d, 1, v, l).unwrap();
+                self.context.i8_type().const_zero().into() // Void 返回
+            }
         }
     }
 
@@ -1750,6 +1788,40 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         self.builder
             .build_extract_value(fat_ptr_val, index, name)
             .unwrap()
+    }
+
+    fn compile_bit_intrinsic(
+        &mut self,
+        kind: BitIntrinsicKind,
+        operand: &MastExpr,
+        expected_ty: BasicTypeEnum<'ctx>,
+    ) -> BasicValueEnum<'ctx> {
+        let val = self.compile_expr(operand);
+
+        let intrinsic_name = match kind {
+            BitIntrinsicKind::PopCount => "llvm.ctpop",
+            BitIntrinsicKind::Clz => "llvm.ctlz",
+            BitIntrinsicKind::Ctz => "llvm.cttz",
+            BitIntrinsicKind::Bswap => "llvm.bswap",
+        };
+
+        let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).unwrap();
+        let decl = intrinsic
+            .get_declaration(&self.module, &[expected_ty])
+            .unwrap();
+
+        let call_site = if kind == BitIntrinsicKind::PopCount || kind == BitIntrinsicKind::Bswap {
+            self.builder
+                .build_call(decl, &[val.into()], "bit_op")
+                .unwrap()
+        } else {
+            let is_zero_poison = self.context.bool_type().const_zero();
+            self.builder
+                .build_call(decl, &[val.into(), is_zero_poison.into()], "lz_tz")
+                .unwrap()
+        };
+
+        call_site.try_as_basic_value().unwrap_basic()
     }
 
     fn compile_lvalue(&mut self, expr: &MastExpr) -> PointerValue<'ctx> {

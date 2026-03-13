@@ -1481,6 +1481,44 @@ impl<'a> Lowerer<'a> {
                     // 7. 不可达: @unreachable() -> !
                     else if name_str == "@unreachable" {
                         return MastExprKind::Unreachable;
+                    } else if name_str == "@popCount" {
+                        return MastExprKind::BitIntrinsic {
+                            kind: BitIntrinsicKind::PopCount,
+                            operand: Box::new(arg_masts.remove(0)),
+                        };
+                    } else if name_str == "@clz" {
+                        return MastExprKind::BitIntrinsic {
+                            kind: BitIntrinsicKind::Clz,
+                            operand: Box::new(arg_masts.remove(0)),
+                        };
+                    } else if name_str == "@ctz" {
+                        return MastExprKind::BitIntrinsic {
+                            kind: BitIntrinsicKind::Ctz,
+                            operand: Box::new(arg_masts.remove(0)),
+                        };
+                    } else if name_str == "@bswap" {
+                        return MastExprKind::BitIntrinsic {
+                            kind: BitIntrinsicKind::Bswap,
+                            operand: Box::new(arg_masts.remove(0)),
+                        };
+                    } else if name_str == "@trap" {
+                        return MastExprKind::Trap;
+                    } else if name_str == "@fence" {
+                        return MastExprKind::Fence;
+                    } else if name_str == "@breakpoint" {
+                        return MastExprKind::Breakpoint;
+                    } else if name_str == "@memcpy" {
+                        return MastExprKind::Memcpy {
+                            dest: Box::new(arg_masts.remove(0)),
+                            src: Box::new(arg_masts.remove(0)),
+                            len: Box::new(arg_masts.remove(0)),
+                        };
+                    } else if name_str == "@memset" {
+                        return MastExprKind::Memset {
+                            dest: Box::new(arg_masts.remove(0)),
+                            val: Box::new(arg_masts.remove(0)),
+                            len: Box::new(arg_masts.remove(0)),
+                        };
                     }
                 }
             }

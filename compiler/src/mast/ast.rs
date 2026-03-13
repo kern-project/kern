@@ -129,6 +129,9 @@ pub enum MastExprKind {
     // --- 1. 基本字面量 ---
     Undef,
     Unreachable,
+    Trap,
+    Fence,
+    Breakpoint,
     Integer(u128),
     Float(f64),
     Bool(bool),
@@ -256,6 +259,22 @@ pub enum MastExprKind {
     // --- 11. LLVM Inline Assembly ---
     /// 经过 Lowering 降级后，完美契合 LLVM `call asm` 指令的数据结构
     Asm(MastAsmBlock),
+
+    BitIntrinsic {
+        kind: BitIntrinsicKind,
+        operand: Box<MastExpr>,
+    },
+
+    Memcpy {
+        dest: Box<MastExpr>,
+        src: Box<MastExpr>,
+        len: Box<MastExpr>,
+    },
+    Memset {
+        dest: Box<MastExpr>,
+        val: Box<MastExpr>,
+        len: Box<MastExpr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -278,4 +297,12 @@ pub enum MastCastKind {
     FloatToInt,   // 浮点数转整数
     FloatCast,    // 浮点数精度转换 (f32 <=> f64)
     ArrayToSlice, // 隐式降级：构造切片胖指针
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitIntrinsicKind {
+    PopCount,
+    Clz,
+    Ctz,
+    Bswap,
 }
