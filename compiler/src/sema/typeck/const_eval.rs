@@ -175,7 +175,7 @@ impl<'a> ConstEvaluator<'a> {
     ) -> Result<i128, ()> {
         let val = self.eval_math_inner(operand, depth + 1)?;
         match op {
-            UnaryOperator::Negate => Ok(-val),
+            UnaryOperator::Negate => Ok(val.wrapping_neg()),
             UnaryOperator::BitwiseNot => Ok(!val),
             UnaryOperator::LogicalNot => Ok(if val == 0 { 1 } else { 0 }),
             _ => {
@@ -363,17 +363,18 @@ impl<'a> ConstEvaluator<'a> {
         let kind = self.ctx.type_registry.get(norm).clone();
 
         match kind {
-            TypeKind::Primitive(p) => self.primitive_align(p),
             TypeKind::Pointer(_) | TypeKind::VolatilePtr(_) | TypeKind::Function { .. } => {
                 self.ctx.target.pointer_size
             }
             TypeKind::Slice(_) | TypeKind::TraitObject(..) => self.ctx.target.pointer_size,
             TypeKind::Mut(inner) => self.compute_type_align_inner(inner, depth + 1),
             TypeKind::Array { elem, .. } => self.compute_type_align_inner(elem, depth + 1),
-
+            
             TypeKind::Def(def_id, generic_args) => {
                 self.compute_def_align(def_id, &generic_args, depth)
             }
+            TypeKind::Primitive(crate::sema::ty::PrimitiveType::Never) | TypeKind::Error => 1,
+            TypeKind::Primitive(p) => self.primitive_align(p),
             _ => 1,
         }
     }
@@ -391,17 +392,25 @@ impl<'a> ConstEvaluator<'a> {
         let kind = self.ctx.type_registry.get(norm).clone();
 
         match kind {
-            TypeKind::Primitive(p) => self.primitive_size(p),
             TypeKind::Pointer(_) | TypeKind::VolatilePtr(_) | TypeKind::Function { .. } => {
                 self.ctx.target.pointer_size
             }
             TypeKind::Slice(_) | TypeKind::TraitObject(..) => self.ctx.target.pointer_size * 2,
             TypeKind::Mut(inner) => self.compute_type_size_inner(inner, depth + 1),
             TypeKind::Array { elem, len } => self.compute_type_size_inner(elem, depth + 1) * len,
-
+            
             TypeKind::Def(def_id, generic_args) => {
                 self.compute_def_size(def_id, &generic_args, depth)
             }
+            TypeKind::Error => {
+                // 如果是求 Error 的大小，说明之前已经报过错了，直接返回 0 防止崩溃
+                0
+            }
+            TypeKind::Primitive(crate::sema::ty::PrimitiveType::Never) => {
+                // Never 类型 (如 !) 代表不可达，但在内存布局中它被视为零尺寸类型 (ZST)
+                0
+            }
+            TypeKind::Primitive(p) => self.primitive_size(p),
             _ => 0,
         }
     }

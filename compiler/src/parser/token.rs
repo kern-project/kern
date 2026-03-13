@@ -11,7 +11,7 @@ pub struct Token {
 pub enum TokenType {
     // === 标识符与字面量 ===
     Identifier,    // abc, my_var
-    IntLiteral,    // 123, 0xFF, 10u8
+    IntLiteral,    // 123, 0xFF
     FloatLiteral,  // 3.14
     StringLiteral, // "hello"
     CharLiteral,   // 'a'

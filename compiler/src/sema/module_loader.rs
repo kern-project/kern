@@ -52,6 +52,8 @@ impl<'a> ModuleLoader<'a> {
         let src = match std::fs::read_to_string(&abs_path) {
             Ok(s) => s,
             Err(e) => {
+                // 不仅打印，还要通知 Context 出现了致命错误
+                self.ctx.error_count += 1; 
                 eprintln!(
                     "Error: Cannot read module file '{}': {}",
                     abs_path.display(),
@@ -61,12 +63,8 @@ impl<'a> ModuleLoader<'a> {
             }
         };
 
-        // 获取文件所在目录，如果是 init.kn，则当前目录就是模块根目录
-        let dir_path = if abs_path.file_name().unwrap().to_string_lossy() == "init.kn" {
-            abs_path.parent().unwrap().to_path_buf()
-        } else {
-            abs_path.parent().unwrap().to_path_buf()
-        };
+        // 获取文件所在目录作为模块的基准查找路径
+        let dir_path = abs_path.parent().unwrap().to_path_buf();
 
         let file_id = self
             .ctx
