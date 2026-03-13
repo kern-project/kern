@@ -1406,7 +1406,7 @@ impl<'a> Lowerer<'a> {
                     let name_str = self.ctx.resolve(f.name);
 
                     // 1. 编译期常量折叠: @sizeof[T]() -> usize
-                    if name_str == "@sizeof" {
+                    if name_str == "@sizeOf" {
                         // 从函数调用的泛型参数中提取 T
                         let target_ty = if let TypeKind::FnDef(_, args) =
                             self.ctx.type_registry.get(callee_mast.ty)
@@ -1419,7 +1419,16 @@ impl<'a> Lowerer<'a> {
                         let size = ce.compute_type_size(target_ty);
                         return MastExprKind::Integer(size as u128);
                     }
-                    // 2. 整数转型: @intCast[T, U](val) -> U
+                    // 2. 对齐计算 @alignOf[T]() -> usize
+                    else if name_str == "@alignOf" { 
+                        let target_ty = if let TypeKind::FnDef(_, args) = self.ctx.type_registry.get(callee_mast.ty) {
+                            args[0]
+                        } else { TypeId::ERROR };
+                        let mut ce = crate::sema::typeck::const_eval::ConstEvaluator::new(self.ctx);
+                        let align = ce.compute_type_align(target_ty);
+                        return MastExprKind::Integer(align as u128);
+                    }
+                    // 3. 整数转型: @intCast[T, U](val) -> U
                     else if name_str == "@intCast" {
                         let operand = arg_masts.remove(0);
 
@@ -1439,28 +1448,28 @@ impl<'a> Lowerer<'a> {
                             operand: Box::new(operand),
                         };
                     }
-                    // 3. 浮点精度转换: @floatCast[T, U](val) -> U
+                    // 4. 浮点精度转换: @floatCast[T, U](val) -> U
                     else if name_str == "@floatCast" {
                         return MastExprKind::Cast {
                             kind: MastCastKind::FloatCast,
                             operand: Box::new(arg_masts.remove(0)),
                         };
                     }
-                    // 4. 整型转浮点: @intToFloat[T, U](val) -> U
+                    // 5. 整型转浮点: @intToFloat[T, U](val) -> U
                     else if name_str == "@intToFloat" {
                         return MastExprKind::Cast {
                             kind: MastCastKind::IntToFloat,
                             operand: Box::new(arg_masts.remove(0)),
                         };
                     }
-                    // 5. 浮点转整型: @floatToInt[T, U](val) -> U
+                    // 6. 浮点转整型: @floatToInt[T, U](val) -> U
                     else if name_str == "@floatToInt" {
                         return MastExprKind::Cast {
                             kind: MastCastKind::FloatToInt,
                             operand: Box::new(arg_masts.remove(0)),
                         };
                     }
-                    // 6. 不可达: @unreachable() -> !
+                    // 7. 不可达: @unreachable() -> !
                     else if name_str == "@unreachable" {
                         return MastExprKind::Unreachable;
                     }
