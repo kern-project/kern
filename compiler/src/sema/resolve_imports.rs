@@ -92,7 +92,7 @@ impl<'a> ImportResolver<'a> {
                 };
 
                 if let Some(symbol_info) = self.ctx.scopes.resolve_in(parent_scope, target_name) {
-                    if !self.check_visibility(symbol_info.def_id, current_mod_id, parent_mod_id) {
+                    if !self.check_visibility(symbol_info, current_mod_id, parent_mod_id) {
                         if emit_errors {
                             let name_str = self.ctx.resolve(target_name).to_string();
                             self.ctx
@@ -145,7 +145,7 @@ impl<'a> ImportResolver<'a> {
                 for member in members {
                     if let Some(symbol_info) = self.ctx.scopes.resolve_in(target_scope, member.name)
                     {
-                        if !self.check_visibility(symbol_info.def_id, current_mod_id, target_mod_id)
+                        if !self.check_visibility(symbol_info, current_mod_id, target_mod_id)
                         {
                             if emit_errors {
                                 let name_str = self.ctx.resolve(member.name).to_string();
@@ -201,24 +201,50 @@ impl<'a> ImportResolver<'a> {
         kind: UsePathKind,
         path: &[SymbolId],
         span: crate::utils::Span,
-        emit_errors: bool, // 🌟 新增静默开关
+        emit_errors: bool, // 静默开关
     ) -> Option<(DefId, ScopeId)> {
+        let mut actual_path = path;
         let (mut curr_mod_id, mut curr_scope) = match kind {
-            UsePathKind::Absolute => (DefId(0), ScopeId(0)),
-            UsePathKind::Relative => (current_mod_id, self.get_module_scope(current_mod_id)),
-            UsePathKind::Super => {
-                if let Def::Module(m) = &self.ctx.defs[current_mod_id.0 as usize] {
-                    if let Some(parent_id) = m.parent {
-                        if self.is_init_module(parent_id) {
-                            if emit_errors {
-                                self.ctx.struct_error(span, "Child modules are strictly forbidden from importing `init.kn` contents").emit();
-                            }
-                            return None;
+            UsePathKind::Root => {
+                if let Some(&first_seg) = actual_path.first() {
+                    // 第一优先级：检查是否请求了外部包 (如 `use std.io;` 中的 `std`)
+                    if let Some(&alias_root_id) = self.ctx.alias_roots.get(&first_seg) {
+                        // 命中外部包,将路径缩短，抛弃 'std'，剩下 '[io]' 给后续遍历
+                        actual_path = &actual_path[1..];
+                        (alias_root_id, self.get_module_scope(alias_root_id))
+                    } else {
+                        // 第二优先级：回退到本地主项目根目录
+                        let mut root_id = current_mod_id;
+                        loop {
+                            if let Def::Module(m) = &self.ctx.defs[root_id.0 as usize] {
+                                if let Some(pid) = m.parent { root_id = pid; } else { break; }
+                            } else { unreachable!() }
                         }
-                        (parent_id, self.get_module_scope(parent_id))
+                        (root_id, self.get_module_scope(root_id))
+                    }
+                } else {
+                    // 空路径容错
+                    let mut root_id = current_mod_id;
+                    loop {
+                        if let Def::Module(m) = &self.ctx.defs[root_id.0 as usize] {
+                            if let Some(pid) = m.parent { root_id = pid; } else { break; }
+                        } else { unreachable!() }
+                    }
+                    (root_id, self.get_module_scope(root_id))
+                }
+            }
+            UsePathKind::Current => {
+                // 当前模块
+                (current_mod_id, self.get_module_scope(current_mod_id))
+            }
+            UsePathKind::Parent => {
+                // 直接跳向父模块
+                if let Def::Module(m) = &self.ctx.defs[current_mod_id.0 as usize] {
+                    if let Some(pid) = m.parent {
+                        (pid, self.get_module_scope(pid))
                     } else {
                         if emit_errors {
-                            self.ctx.struct_error(span, "Cannot use `..` because the current module is a top-level module").emit();
+                            self.ctx.struct_error(span, "Cannot use `..` (Parent) from the root module").emit();
                         }
                         return None;
                     }
@@ -228,11 +254,13 @@ impl<'a> ImportResolver<'a> {
             }
         };
 
-        if path.is_empty() {
+        // 如果路径是空的，说明目标就是起始模块自己 (例如 `use .{ A, B }` 或者 `use ..{ C }`)
+        if actual_path.is_empty() {
             return Some((curr_mod_id, curr_scope));
         }
 
-        for &segment in path {
+        // 常规路径遍历
+        for &segment in actual_path {
             if let Some(symbol) = self.ctx.scopes.resolve_in(curr_scope, segment) {
                 if symbol.kind == SymbolKind::Module {
                     if let Some(target_def_id) = symbol.def_id {
@@ -269,23 +297,29 @@ impl<'a> ImportResolver<'a> {
     /// 检查符号是否对当前模块可见
     fn check_visibility(
         &self,
-        symbol_def_id: Option<DefId>,
+        symbol_info: &SymbolInfo, 
         current_mod: DefId,
         target_mod: DefId,
     ) -> bool {
-        // 如果是从当前模块自身导入，永远可见
+        // 1. 如果是从当前模块自身导入（或者是它的子模块向父模块索取），直接放行
         if current_mod == target_mod {
             return true;
         }
 
-        let def_id = match symbol_def_id {
+        // 2. 检查这个符号在目标作用域里的可见性
+        // 如果这里是 false，说明它是目标的私有财产，不管是模块还是变量，一律拦截
+        if !symbol_info.is_pub {
+            return false;
+        }
+
+        // 3. 如果 symbol_info 说是 public 的（比如通过 pub use，或者 pub fn），
+        // 我们再去检查它的底层实体是否真的是公开的。
+        let def_id = match symbol_info.def_id {
             Some(id) => id,
-            None => return true, // 如果没有 DefId（例如内置虚假符号），假定可见
+            None => return true,
         };
 
         let def = &self.ctx.defs[def_id.0 as usize];
-
-        // 提取定义本身的可见性
         let vis = match def {
             Def::Function(d) => d.vis,
             Def::Struct(d) => d.vis,
@@ -295,17 +329,12 @@ impl<'a> ImportResolver<'a> {
             Def::Global(d) => d.vis,
             Def::TypeAlias(d) => d.vis,
             Def::Adt(d) => d.vis,
-            Def::Module(_) => Visibility::Public, // 模块本身的可见性通常由其导出方式决定，默认为 Pub
-            Def::Impl(_) => return true,          // Impl 块没有直接的可见性概念
+            // 模块本体视为公开，它的真正可见性已经被上面的 `!symbol_info.is_pub` 控制了
+            Def::Module(_) => Visibility::Public, 
+            Def::Impl(_) => return true,
         };
 
-        match vis {
-            Visibility::Public => true,
-            Visibility::Private => {
-                // 私有成员仅对同模块可见。
-                false
-            }
-        }
+        matches!(vis, Visibility::Public)
     }
 
     // ==========================================

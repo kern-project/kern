@@ -28,7 +28,38 @@ impl<'a> ModuleLoader<'a> {
     pub fn load_root(&mut self, root_file: &str) -> Option<DefId> {
         let path = PathBuf::from(root_file);
         let name = self.ctx.intern("root");
-        self.load_module(path, None, name)
+        let root_id = self.load_module(path, None, name);
+
+        // 预加载所有通过 -M 注入的外部别名包
+        let aliases = self.ctx.module_aliases.clone();
+        for (alias_name, alias_path) in aliases {
+            let sym = self.ctx.intern(&alias_name);
+            let base_path = PathBuf::from(&alias_path);
+            
+            let dir_init = base_path.join("init.kn");
+            let file_kn = PathBuf::from(format!("{}.kn", base_path.display()));
+            
+            let sub_path = if dir_init.exists() {
+                Some(dir_init)
+            } else if file_kn.exists() {
+                Some(file_kn)
+            } else if base_path.exists() && base_path.is_file() {
+                Some(base_path)
+            } else {
+                eprintln!("Error: Cannot find module path for alias `{}` at `{}`", alias_name, alias_path);
+                None
+            };
+
+            if let Some(p) = sub_path {
+                // 作为顶级独立模块加载 (parent 传入 None)
+                if let Some(mod_id) = self.load_module(p, None, sym) {
+                    // 将其 DefId 存入全局外部包注册表
+                    self.ctx.alias_roots.insert(sym, mod_id);
+                }
+            }
+        }
+
+        root_id
     }
 
     /// 核心算法：递归按需加载
@@ -75,6 +106,8 @@ impl<'a> ModuleLoader<'a> {
         let scope_id = self.ctx.scopes.enter_scope();
         self.ctx.scopes.exit_scope();
 
+        let is_init = abs_path.file_name().and_then(|n| n.to_str()) == Some("init.kn");
+
         let dummy_def = ModuleDef {
             id: mod_id,
             name,
@@ -82,6 +115,7 @@ impl<'a> ModuleLoader<'a> {
             scope_id,
             dir_path: dir_path.clone(),
             file_id,
+            is_init,
             submodules: HashMap::new(),
             items: Vec::new(),
             imports: Vec::new(),
@@ -96,40 +130,36 @@ impl<'a> ModuleLoader<'a> {
         };
         ast.path = abs_path.to_string_lossy().to_string();
 
+        // 在扫描子模块之前，对当前 AST 进行就地剪枝
+        // 这样带有 false 条件的 #[if(...)] mod xxx; 就会被直接删除，不会触发后续的物理加载
+        let mut pruner = crate::sema::prune::Pruner::new(self.ctx);
+        pruner.prune_module(&mut ast);
+
         let mut submodules = HashMap::new();
 
-        // 4. 扫描文件内部的 `use .xxx`，按需去文件系统寻找子模块
+        // 4. 扫描显式的 `mod xxx;` 声明来挂载子模块
         for decl in &ast.decls {
-            if let ast::DeclKind::Use {
-                kind,
-                path: use_path,
-                ..
-            } = &decl.kind
-            {
-                if *kind == ast::UsePathKind::Relative {
-                    if let Some(&first_seg) = use_path.first() {
-                        if !submodules.contains_key(&first_seg) {
-                            let mod_name_str = self.ctx.resolve(first_seg);
+            if let ast::DeclKind::ModDecl { .. } = &decl.kind {
+                let mod_name_str = self.ctx.resolve(decl.name);
 
-                            // Kern 路径嗅探规则：优先找 mod_name/init.kn，其次找 mod_name.kn
-                            let dir_init = dir_path.join(mod_name_str).join("init.kn");
-                            let file_kn = dir_path.join(format!("{}.kn", mod_name_str));
+                // 内部子模块直接去物理目录下找
+                let dir_init = dir_path.join(mod_name_str).join("init.kn");
+                let file_kn = dir_path.join(format!("{}.kn", mod_name_str));
 
-                            let sub_path = if dir_init.exists() {
-                                Some(dir_init)
-                            } else if file_kn.exists() {
-                                Some(file_kn)
-                            } else {
-                                None
-                            };
+                let sub_path = if dir_init.exists() {
+                    Some(dir_init)
+                } else if file_kn.exists() {
+                    Some(file_kn)
+                } else {
+                    self.ctx.struct_error(decl.span, format!("Cannot find module file for `{}`", mod_name_str))
+                        .with_hint(format!("expected to find `{}` or `{}`", file_kn.display(), dir_init.display()))
+                        .emit();
+                    None
+                };
 
-                            // 如果找到了物理文件，立刻递归加载它，并挂载到当前模块的 submodules 树上
-                            if let Some(p) = sub_path {
-                                if let Some(sub_id) = self.load_module(p, Some(mod_id), first_seg) {
-                                    submodules.insert(first_seg, sub_id);
-                                }
-                            }
-                        }
+                if let Some(p) = sub_path {
+                    if let Some(sub_id) = self.load_module(p, Some(mod_id), decl.name) {
+                        submodules.insert(decl.name, sub_id);
                     }
                 }
             }
