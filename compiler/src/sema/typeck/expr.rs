@@ -144,6 +144,25 @@ impl<'a> ExprChecker<'a> {
         ty
     }
 
+    /// 检查一个独立执行的表达式，其返回值是否被非法隐式丢弃
+    fn check_discarded_expr(&mut self, expr: &Expr) {
+        let ty = self.check_expr(expr, None);
+        let norm_ty = self.strip_mut(ty);
+
+        // 如果既不是 void，也不是发散的 never，更不是已经报错的 error，那就是非法丢弃
+        if norm_ty != TypeId::VOID && norm_ty != TypeId::NEVER && norm_ty != TypeId::ERROR {
+            let ty_str = self.ctx.ty_to_string(ty);
+            self.ctx
+                .struct_error(expr.span, "ignored non-void return value")
+                .with_hint(format!(
+                    "expression evaluates to `{}`, which must be explicitly used or discarded",
+                    ty_str
+                ))
+                .with_hint("in Kern, use `let _ = ...;` to explicitly discard the value")
+                .emit();
+        }
+    }
+
     fn check_identifier(&mut self, name: crate::utils::SymbolId, span: Span) -> TypeId {
         if let Some(info) = self.ctx.scopes.resolve(name) {
             if info.kind == SymbolKind::Function {
@@ -416,7 +435,7 @@ impl<'a> ExprChecker<'a> {
         for stmt in stmts {
             match &stmt.kind {
                 StmtKind::ExprStmt(e) | StmtKind::ExprValue(e) => {
-                    self.check_expr(e, None);
+                    self.check_discarded_expr(e);
                 }
             }
         }
@@ -512,22 +531,22 @@ impl<'a> ExprChecker<'a> {
     ) -> TypeId {
         self.ctx.scopes.enter_scope();
         if let Some(i) = init {
-            self.check_expr(i, None);
+            self.check_discarded_expr(i); 
         }
         if let Some(c) = cond {
             let c_ty = self.check_expr(c, Some(TypeId::BOOL));
             self.check_coercion(c.span, TypeId::BOOL, c_ty);
         }
         if let Some(p) = post {
-            self.check_expr(p, None);
+            self.check_discarded_expr(p); 
         }
-        self.check_expr(body, None);
+        self.check_discarded_expr(body); 
         self.ctx.scopes.exit_scope();
         TypeId::VOID
     }
 
     fn check_defer(&mut self, defer_expr: &Expr) -> TypeId {
-        self.check_expr(defer_expr, None);
+        self.check_discarded_expr(defer_expr); 
         TypeId::VOID
     }
 
