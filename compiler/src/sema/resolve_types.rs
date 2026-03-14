@@ -15,9 +15,8 @@ impl<'a> TypeResolver<'a> {
         Self { ctx }
     }
 
-    /// 执行完整的类型解析 Pass
+    /// 执行完整的类型解析 Pass (Two-Pass 架构)
     pub fn resolve_all(&mut self) {
-        // 基于模块层级进行遍历，以获取正确的词法作用域上下文
         let module_ids: Vec<DefId> = self
             .ctx
             .defs
@@ -31,22 +30,35 @@ impl<'a> TypeResolver<'a> {
             })
             .collect();
 
-        for mod_id in module_ids {
-            self.resolve_module(mod_id);
-        }
-    }
-
-    fn resolve_module(&mut self, mod_id: DefId) {
-        let (mod_scope, items) = {
-            if let Def::Module(m) = &self.ctx.defs[mod_id.0 as usize] {
+        // Pass 1: 优先解析所有的 TypeAlias
+        // 解决跨模块引用的前向依赖问题 (例如 Struct 字段依赖另一个模块的 TypeAlias)
+        for &mod_id in &module_ids {
+            let (mod_scope, items) = if let Def::Module(m) = &self.ctx.defs[mod_id.0 as usize] {
                 (m.scope_id, m.items.clone())
             } else {
                 unreachable!()
-            }
-        };
+            };
 
-        for item_id in items {
-            self.resolve_item(item_id, mod_scope);
+            for item_id in items {
+                if matches!(self.ctx.defs[item_id.0 as usize], Def::TypeAlias(_)) {
+                    self.resolve_item(item_id, mod_scope);
+                }
+            }
+        }
+
+        // Pass 2: 解析其余所有的实体定义 (Struct, Union, Enum, Function, Trait 等)
+        for mod_id in module_ids {
+            let (mod_scope, items) = if let Def::Module(m) = &self.ctx.defs[mod_id.0 as usize] {
+                (m.scope_id, m.items.clone())
+            } else {
+                unreachable!()
+            };
+
+            for item_id in items {
+                if !matches!(self.ctx.defs[item_id.0 as usize], Def::TypeAlias(_)) {
+                    self.resolve_item(item_id, mod_scope);
+                }
+            }
         }
     }
 
@@ -655,7 +667,22 @@ impl<'a> TypeResolver<'a> {
             }
             SymbolKind::TypeAlias => {
                 let def_id = final_sym.def_id.unwrap();
-                let target_ty = final_sym.type_id;
+
+                // 动态获取最新解析的 AST 类型，不要用 Import 克隆带来的陈旧 final_sym.type_id
+                let target_ty = if let Def::TypeAlias(t_def) = &self.ctx.defs[def_id.0 as usize] {
+                    self.ctx.node_types.get(&t_def.target.id).copied().unwrap_or(TypeId::ERROR)
+                } else {
+                    TypeId::ERROR
+                };
+
+                // 防止因循环依赖或解析顺序导致的静默 ERROR 污染 AST
+                if target_ty == TypeId::ERROR {
+                    let name = self.ctx.resolve(*segments.last().unwrap()).to_string();
+                    self.ctx.struct_error(span, format!("type alias `{}` could not be resolved", name))
+                        .with_hint("this might be caused by an invalid circular alias dependency or use before resolution")
+                        .emit();
+                    return TypeId::ERROR;
+                }
 
                 if resolved_generics.is_empty() {
                     // 没有传入泛型，直接穿透返回
