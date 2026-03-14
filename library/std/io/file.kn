@@ -1,0 +1,23 @@
+use std.os;
+use ..traits.Writer;
+
+pub type File = struct {
+    handle: os.Handle,
+};
+
+// 2. 为 File 的指针实现 Writer Trait
+impl *mut File : Writer {
+    pub fn write(buf: []u8) usize {
+        let len = #buf;
+        if (len == 0) return 0;
+        
+        let ptr = buf.[0].&;
+        // 统一调用 os.write，把自身包裹的 handle 传进去
+        return os.write(self.handle, ptr, len); 
+    }
+}
+
+// 3. 构造 标准输出 File 的工厂函数
+pub fn stdout() File {
+    return .{ handle: os.get_stdout_handle() };
+}

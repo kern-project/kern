@@ -1,0 +1,4 @@
+pub type Result[T, E] = adt {
+    Ok: T,
+    Err: E,
+};

@@ -1,4 +1,6 @@
+// compile-flags: --link-libc
 // expected-stdout: Hello World from Kern 0.3.9227465!
+
 extern {
     fn printf(format: *u8, ...) i32;
 }

@@ -3,5 +3,5 @@ pub type Writer = trait {
 };
 
 pub type Printable = trait {
-    fmt: fn(*mut Writer) void,
+    fmt: fn(mut Writer) void,
 };

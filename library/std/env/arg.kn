@@ -1,4 +1,4 @@
-use ..debug.Option;
+use std.debug.Option;
 
 // 迭代器状态结构体
 pub type Args = struct {
@@ -46,12 +46,12 @@ impl *mut Args {
 
 /// 在 **u8 上挂载扩展方法
 impl **u8 {
-    pub fn to_args(argc: i32) mut Args {
+    pub fn to_args(argc: i32) Args {
         // 返回明确初始化的 Args 结构体
         .{
             argv: self, 
             argc: argc,
             // current 自动使用默认值 0
-        };
+        }
     }
 }

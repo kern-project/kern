@@ -1,1 +1,11 @@
-use .linux;
+// 如果是 Linux，才解析 linux.kn，并导出
+#[if(os == "linux")]
+mod linux;
+#[if(os == "linux")]
+pub use .linux.{Handle, get_stdout_handle, write, exit};
+
+// 如果是 Windows，才解析 windows.kn，并导出
+#[if(os == "windows")]
+mod windows;
+#[if(os == "windows")]
+pub use .windows.{Handle, get_stdout_handle, write, exit};

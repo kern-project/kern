@@ -1,57 +1,140 @@
-use .traits.Writer;
-use .traits.Printable;
+use ..traits.Writer;
+use ..traits.Printable;
 
 /// 字符串字面量
 impl *[]u8 : Printable {
-    pub fn fmt(writer: *mut Writer) void {
+    pub fn fmt(writer: mut Writer) void {
         let _ = writer.write(self.*);
     }
 }
 
 /// 整数格式化辅助函数
-fn write_u64_to_writer(val: u64, writer: *mut Writer) void {
-    if (val == u64.{0}) {
+fn write_u64_to_writer(val: u64, writer: mut Writer) void {
+    if (val == 0) {
         let _ = writer.write("0");
         return;
     }
 
     // u64 最大 20 位字符，使用 undef 避免初始化开销
-    let buf = mut [20]mut u8.{undef};
-    let i = mut usize.{20};
+    let buf = [20]mut u8.{undef};
+    let i = 20;
     let curr = mut u64.{val};
 
-    for (; curr > u64.{0}; ) {
-        i -= usize.{1};
-        let digit = curr % u64.{10};
+    for (; curr > 0; ) {
+        i -= 1;
+        let digit = curr % 10;
         // 提取最后一位，转为 u8，加上 ASCII '0' (48)
-        buf.[i] = @intCast[u64, u8](digit) + u8.{48};
-        curr /= u64.{10};
+        buf.[i] = @intCast[u64, u8](digit) + 48;
+        curr /= 10;
     }
 
     // 构造有效切片并写入
-    let valid_slice = buf.[i .. usize.{20}];
+    let valid_slice = buf.[i .. 20];
     let _ = writer.write(valid_slice);
+}
+
+fn write_i64_to_writer(val: i64, writer: mut Writer) void {
+    if (val < i64.{0}) {
+        let _ = writer.write("-");
+        // TODO: 这里如果 val 是 i64 的最小值，0 - val 会溢出。未来可以使用位运算优化。
+        let pos_val = @intCast[i64, u64](i64.{0} - val);
+        write_u64_to_writer(pos_val, writer);
+    } else {
+        write_u64_to_writer(@intCast[i64, u64](val), writer);
+    }
 }
 
 /// u64
 impl *u64 : Printable {
-    pub fn fmt(writer: *mut Writer) void {
+    pub fn fmt(writer: mut Writer) void {
         write_u64_to_writer(self.*, writer);
     }
 }
 
 // i64
 impl *i64 : Printable {
-    pub fn fmt(writer: *mut Writer) void {
+    pub fn fmt(writer: mut Writer) void {
         let val = self.*;
-        if (val < i64.{0}) {
+        if (val < 0) {
             let _ = writer.write("-");
             // 处理负数，转为无符号格式化
             // 负数转正：0 - val
-            let pos_val = @intCast[i64, u64](i64.{0} - val);
+            // TODO: i64::MIN
+            let pos_val = @intCast[i64, u64](0 - val);
             write_u64_to_writer(pos_val, writer);
         } else {
             write_u64_to_writer(@intCast[i64, u64](val), writer);
+        }
+    }
+}
+
+impl *u64 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_u64_to_writer(self.*, writer);
+    }
+}
+
+impl *u32 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_u64_to_writer(@intCast[u32, u64](self.*), writer);
+    }
+}
+
+impl *u16 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_u64_to_writer(@intCast[u16, u64](self.*), writer);
+    }
+}
+
+impl *u8 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_u64_to_writer(@intCast[u8, u64](self.*), writer);
+    }
+}
+
+impl *usize : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        // 在 32 位和 64 位系统上，usize 转换为 u64 都是安全的
+        write_u64_to_writer(@intCast[usize, u64](self.*), writer);
+    }
+}
+
+impl *i64 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_i64_to_writer(self.*, writer);
+    }
+}
+
+impl *i32 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_i64_to_writer(@intCast[i32, i64](self.*), writer);
+    }
+}
+
+impl *i16 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_i64_to_writer(@intCast[i16, i64](self.*), writer);
+    }
+}
+
+impl *i8 : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_i64_to_writer(@intCast[i8, i64](self.*), writer);
+    }
+}
+
+impl *isize : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        write_i64_to_writer(@intCast[isize, i64](self.*), writer);
+    }
+}
+
+impl *bool : Printable {
+    pub fn fmt(writer: mut Writer) void {
+        if (self.*) {
+            let _ = writer.write("true");
+        } else {
+            let _ = writer.write("false");
         }
     }
 }

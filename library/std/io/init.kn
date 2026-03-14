@@ -1,16 +1,8 @@
-use ..os.linux;
+pub mod impls;
+mod traits;
+mod fmt;
+mod file;
 
-// 封装 write 系统调用 (Linux syscall number 1)
-pub fn write(fd: usize, buffer: *u8, len: usize) usize {
-    let sys_write_num = 1;
-    linux.syscall3(sys_write_num, fd, buffer as usize, len)
-}
-
-// 标准输出辅助函数
-pub fn print(text: []u8) void {
-    let ptr = text.[0].&; 
-    let len = #text;
-    
-    // fd 1 是标准输出 (stdout)
-    let _ = write(1, ptr, len);
-}
+pub use .fmt.println;
+pub use .traits.{Printable, Writer};
+pub use .file.{File, stdout};
