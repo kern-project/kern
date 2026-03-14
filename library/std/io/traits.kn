@@ -1,0 +1,7 @@
+pub type Writer = trait {
+    write: fn([]u8) usize,
+};
+
+pub type Printable = trait {
+    fmt: fn(*mut Writer) void,
+};

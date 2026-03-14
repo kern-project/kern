@@ -1,0 +1,57 @@
+use ..debug.Option;
+
+// 迭代器状态结构体
+pub type Args = struct {
+    argv: **u8,
+    argc: i32,
+    current: mut i32 = 0,
+};
+
+// 辅助函数：计算 C 字符串长度
+fn c_strlen(str: *u8) usize {
+    let len = 0;
+    for (;;) {
+        let current_ptr = (str as usize + len) as *u8;
+        if (current_ptr.* == u8.{0}) {
+            return len;
+        }
+        len += 1;
+    }
+    len
+}
+
+// 为迭代器本身实现 next 方法
+impl *mut Args {
+    pub fn next() Option[[]u8] {
+        if (self.current >= self.argc) {
+            return .{ None }; 
+        }
+
+        // 计算当前参数的二级指针地址：argv + (current * 8)
+        let ptr_size = @sizeOf[*u8]();
+        let current_arg_ptr_ptr = (self.argv as usize + (@intCast[i32, usize](self.current) * ptr_size)) as **u8;
+        
+        // 取出 *u8 (具体的 C 字符串指针)
+        let c_str = current_arg_ptr_ptr.*;
+        let len = c_strlen(c_str);
+        
+        // 构造切片
+        let kern_slice = c_str.[0 .. len];
+        
+        self.current += i32.{1};
+        
+        return .{ Some: kern_slice };
+    }
+}
+
+/// 在 **u8 上挂载扩展方法
+impl **u8 {
+    pub fn to_args(argc: i32) mut Args {
+        // 返回明确初始化的 Args 结构体
+        .{
+            argv: self, 
+            argc: argc,
+            // current 自动使用默认值 0
+        };
+    }
+}

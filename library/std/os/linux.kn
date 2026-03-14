@@ -1,0 +1,34 @@
+#![if(not os == "linux")]
+
+// 基础的 3 参数系统调用封装
+pub fn syscall3(sys_num: usize, arg1: usize, arg2: usize, arg3: usize) usize {
+    let ret = mut usize.{undef};
+
+    @asm(.{
+        asm: .{ "syscall", },
+        // 将输出绑定到内核的 ret 变量
+        outputs: .{ rax: ret.& },
+        // 将输入变量绑定到对应的物理寄存器
+        inputs: .{ 
+            rax: sys_num, 
+            rdi: arg1, 
+            rsi: arg2, 
+            rdx: arg3 
+        },
+        // 告诉编译器这些寄存器和内存会被修改，防止激进优化
+        clobbers: .{ "rcx", "r11", "memory" },
+        volatile: true
+    });
+
+    return ret;
+}
+
+// 封装 exit (Linux syscall number 60)
+pub fn exit(code: i32) ! {
+    // sys_exit 的参数是 int，我们需要将其转换为 usize
+    let sys_exit_num = 60;
+    let _ = syscall3(sys_exit_num, @intCast[i32, usize](code), 0, 0);
+    
+    // exit 永不返回，使用 @unreachable 帮助编译器切断控制流图
+    @unreachable()
+}

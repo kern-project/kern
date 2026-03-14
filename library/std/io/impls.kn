@@ -1,0 +1,57 @@
+use .traits.Writer;
+use .traits.Printable;
+
+/// 字符串字面量
+impl *[]u8 : Printable {
+    pub fn fmt(writer: *mut Writer) void {
+        let _ = writer.write(self.*);
+    }
+}
+
+/// 整数格式化辅助函数
+fn write_u64_to_writer(val: u64, writer: *mut Writer) void {
+    if (val == u64.{0}) {
+        let _ = writer.write("0");
+        return;
+    }
+
+    // u64 最大 20 位字符，使用 undef 避免初始化开销
+    let buf = mut [20]mut u8.{undef};
+    let i = mut usize.{20};
+    let curr = mut u64.{val};
+
+    for (; curr > u64.{0}; ) {
+        i -= usize.{1};
+        let digit = curr % u64.{10};
+        // 提取最后一位，转为 u8，加上 ASCII '0' (48)
+        buf.[i] = @intCast[u64, u8](digit) + u8.{48};
+        curr /= u64.{10};
+    }
+
+    // 构造有效切片并写入
+    let valid_slice = buf.[i .. usize.{20}];
+    let _ = writer.write(valid_slice);
+}
+
+/// u64
+impl *u64 : Printable {
+    pub fn fmt(writer: *mut Writer) void {
+        write_u64_to_writer(self.*, writer);
+    }
+}
+
+// i64
+impl *i64 : Printable {
+    pub fn fmt(writer: *mut Writer) void {
+        let val = self.*;
+        if (val < i64.{0}) {
+            let _ = writer.write("-");
+            // 处理负数，转为无符号格式化
+            // 负数转正：0 - val
+            let pos_val = @intCast[i64, u64](i64.{0} - val);
+            write_u64_to_writer(pos_val, writer);
+        } else {
+            write_u64_to_writer(@intCast[i64, u64](val), writer);
+        }
+    }
+}

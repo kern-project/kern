@@ -1,0 +1,17 @@
+use ..os.linux;
+
+extern {
+    fn main() i32;
+}
+
+#[export_name("_start")]
+extern fn _start() void {
+    // - 解析栈上的 argc 和 argv，
+    // - 初始化全局分配器 
+    // - 设置硬件异常处理表 (针对 Bare metal)
+    let exit_code = main();
+    
+    // 3. 执行退出操作（例如 flush stdout 缓冲区等）
+    linux.exit(exit_code);
+    @trap();
+}

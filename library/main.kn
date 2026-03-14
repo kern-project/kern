@@ -1,0 +1,7 @@
+use .std.io;
+use .std.runtime;
+
+extern fn main() i32 {
+    io.print("Hello, Bare Metal Kern!\n");
+    0
+}

@@ -1,0 +1,4 @@
+pub type Option[T] = adt {
+    Some: T,
+    None,
+};
