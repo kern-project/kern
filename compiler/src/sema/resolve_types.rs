@@ -670,7 +670,11 @@ impl<'a> TypeResolver<'a> {
 
                 // 动态获取最新解析的 AST 类型，不要用 Import 克隆带来的陈旧 final_sym.type_id
                 let target_ty = if let Def::TypeAlias(t_def) = &self.ctx.defs[def_id.0 as usize] {
-                    self.ctx.node_types.get(&t_def.target.id).copied().unwrap_or(TypeId::ERROR)
+                    self.ctx
+                        .node_types
+                        .get(&t_def.target.id)
+                        .copied()
+                        .unwrap_or(TypeId::ERROR)
                 } else {
                     TypeId::ERROR
                 };

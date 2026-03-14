@@ -12,7 +12,9 @@ fn print_usage(program_name: &str) {
     println!("Build Options:");
     println!("  -o <file>             Write output to <file>");
     println!("  -D <key=val>          Define a variable for conditional compilation");
-    println!("  -M <name=path>        Map a module name to a physical directory (e.g., -M std=./library/std)");
+    println!(
+        "  -M <name=path>        Map a module name to a physical directory (e.g., -M std=./library/std)"
+    );
     println!("  -O<0-3>               Set optimization level (default: O0)");
 
     println!("\nTargeting & Codegen:");
@@ -43,17 +45,25 @@ fn parse_args() -> CompileOptions {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "-h" | "--help" => { print_usage(&program_name); process::exit(0); }
-            "-v" | "--version" => { println!("kernc version {}", env!("CARGO_PKG_VERSION")); process::exit(0); }
+            "-h" | "--help" => {
+                print_usage(&program_name);
+                process::exit(0);
+            }
+            "-v" | "--version" => {
+                println!("kernc version {}", env!("CARGO_PKG_VERSION"));
+                process::exit(0);
+            }
             "-o" => options.output_file = args.next().expect("Expected file name after `-o`"),
             "-O0" => options.opt_level = OptLevel::O0,
             "-O1" => options.opt_level = OptLevel::O1,
             "-O2" => options.opt_level = OptLevel::O2,
             "-O3" => options.opt_level = OptLevel::O3,
             "--emit-llvm" => options.emit_llvm_ir = true,
-            "--link-libc" => options.link_libc = true, 
+            "--link-libc" => options.link_libc = true,
             "--target" => {
-                let triple_str = args.next().expect("Expected target triple after `--target`");
+                let triple_str = args
+                    .next()
+                    .expect("Expected target triple after `--target`");
                 options.target = TargetMachine::new(&triple_str).unwrap_or_else(|e| {
                     eprintln!("Error: Invalid target triple: {}", e);
                     process::exit(1);
@@ -64,10 +74,13 @@ fn parse_args() -> CompileOptions {
                 options.asm_dialect = match dialect_str.as_str() {
                     "intel" => AsmDialect::Intel,
                     "att" => AsmDialect::Att,
-                    _ => { eprintln!("Error: Invalid asm dialect"); process::exit(1); }
+                    _ => {
+                        eprintln!("Error: Invalid asm dialect");
+                        process::exit(1);
+                    }
                 };
             }
-            "--cc" => { 
+            "--cc" => {
                 options.linker_cmd = args.next().expect("Expected command after `--cc`");
             }
             "-D" => {
@@ -77,16 +90,20 @@ fn parse_args() -> CompileOptions {
                     eprintln!("Error: Invalid define format. Expected `key=value`.");
                     process::exit(1);
                 }
-                options.custom_defines.insert(parts[0].to_string(), parts[1].to_string());
+                options
+                    .custom_defines
+                    .insert(parts[0].to_string(), parts[1].to_string());
             }
-            "-M" => { 
+            "-M" => {
                 let map_str = args.next().expect("Expected `name=path` after `-M`");
                 let parts: Vec<&str> = map_str.splitn(2, '=').collect();
                 if parts.len() != 2 {
                     eprintln!("Error: Invalid module map format. Expected `name=path`.");
                     process::exit(1);
                 }
-                options.module_aliases.insert(parts[0].to_string(), parts[1].to_string());
+                options
+                    .module_aliases
+                    .insert(parts[0].to_string(), parts[1].to_string());
             }
             _ => {
                 if arg.starts_with('-') {
@@ -112,7 +129,9 @@ fn parse_args() -> CompileOptions {
     // 如果没有手动指定 -M std=...，补齐标准库路径
     if !options.module_aliases.contains_key("std") {
         // 假设编译器运行在项目根目录，标准库在 ./library/std
-        options.module_aliases.insert("std".to_string(), "library/std".to_string());
+        options
+            .module_aliases
+            .insert("std".to_string(), "library/std".to_string());
     }
 
     options

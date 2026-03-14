@@ -145,8 +145,7 @@ impl<'a> ImportResolver<'a> {
                 for member in members {
                     if let Some(symbol_info) = self.ctx.scopes.resolve_in(target_scope, member.name)
                     {
-                        if !self.check_visibility(symbol_info, current_mod_id, target_mod_id)
-                        {
+                        if !self.check_visibility(symbol_info, current_mod_id, target_mod_id) {
                             if emit_errors {
                                 let name_str = self.ctx.resolve(member.name).to_string();
                                 self.ctx
@@ -217,8 +216,14 @@ impl<'a> ImportResolver<'a> {
                         let mut root_id = current_mod_id;
                         loop {
                             if let Def::Module(m) = &self.ctx.defs[root_id.0 as usize] {
-                                if let Some(pid) = m.parent { root_id = pid; } else { break; }
-                            } else { unreachable!() }
+                                if let Some(pid) = m.parent {
+                                    root_id = pid;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                unreachable!()
+                            }
                         }
                         (root_id, self.get_module_scope(root_id))
                     }
@@ -227,8 +232,14 @@ impl<'a> ImportResolver<'a> {
                     let mut root_id = current_mod_id;
                     loop {
                         if let Def::Module(m) = &self.ctx.defs[root_id.0 as usize] {
-                            if let Some(pid) = m.parent { root_id = pid; } else { break; }
-                        } else { unreachable!() }
+                            if let Some(pid) = m.parent {
+                                root_id = pid;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            unreachable!()
+                        }
                     }
                     (root_id, self.get_module_scope(root_id))
                 }
@@ -244,7 +255,9 @@ impl<'a> ImportResolver<'a> {
                         (pid, self.get_module_scope(pid))
                     } else {
                         if emit_errors {
-                            self.ctx.struct_error(span, "Cannot use `..` (Parent) from the root module").emit();
+                            self.ctx
+                                .struct_error(span, "Cannot use `..` (Parent) from the root module")
+                                .emit();
                         }
                         return None;
                     }
@@ -297,7 +310,7 @@ impl<'a> ImportResolver<'a> {
     /// 检查符号是否对当前模块可见
     fn check_visibility(
         &self,
-        symbol_info: &SymbolInfo, 
+        symbol_info: &SymbolInfo,
         current_mod: DefId,
         target_mod: DefId,
     ) -> bool {
@@ -330,7 +343,7 @@ impl<'a> ImportResolver<'a> {
             Def::TypeAlias(d) => d.vis,
             Def::Adt(d) => d.vis,
             // 模块本体视为公开，它的真正可见性已经被上面的 `!symbol_info.is_pub` 控制了
-            Def::Module(_) => Visibility::Public, 
+            Def::Module(_) => Visibility::Public,
             Def::Impl(_) => return true,
         };
 

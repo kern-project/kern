@@ -35,10 +35,10 @@ impl<'a> ModuleLoader<'a> {
         for (alias_name, alias_path) in aliases {
             let sym = self.ctx.intern(&alias_name);
             let base_path = PathBuf::from(&alias_path);
-            
+
             let dir_init = base_path.join("init.kn");
             let file_kn = PathBuf::from(format!("{}.kn", base_path.display()));
-            
+
             let sub_path = if dir_init.exists() {
                 Some(dir_init)
             } else if file_kn.exists() {
@@ -46,7 +46,10 @@ impl<'a> ModuleLoader<'a> {
             } else if base_path.exists() && base_path.is_file() {
                 Some(base_path)
             } else {
-                eprintln!("Error: Cannot find module path for alias `{}` at `{}`", alias_name, alias_path);
+                eprintln!(
+                    "Error: Cannot find module path for alias `{}` at `{}`",
+                    alias_name, alias_path
+                );
                 None
             };
 
@@ -151,8 +154,16 @@ impl<'a> ModuleLoader<'a> {
                 } else if file_kn.exists() {
                     Some(file_kn)
                 } else {
-                    self.ctx.struct_error(decl.span, format!("Cannot find module file for `{}`", mod_name_str))
-                        .with_hint(format!("expected to find `{}` or `{}`", file_kn.display(), dir_init.display()))
+                    self.ctx
+                        .struct_error(
+                            decl.span,
+                            format!("Cannot find module file for `{}`", mod_name_str),
+                        )
+                        .with_hint(format!(
+                            "expected to find `{}` or `{}`",
+                            file_kn.display(),
+                            dir_init.display()
+                        ))
                         .emit();
                     None
                 };

@@ -301,7 +301,10 @@ impl<'a> ExprChecker<'a> {
 
         let norm_lhs = self.strip_mut(lhs_ty);
         match self.ctx.type_registry.get(norm_lhs) {
-            TypeKind::Array { elem, .. } | TypeKind::Slice(elem) | TypeKind::Pointer(elem) | TypeKind::VolatilePtr(elem) => {
+            TypeKind::Array { elem, .. }
+            | TypeKind::Slice(elem)
+            | TypeKind::Pointer(elem)
+            | TypeKind::VolatilePtr(elem) => {
                 let base_elem = *elem;
                 let slice_elem = if self.is_mut_type(lhs_ty) {
                     self.ctx.type_registry.intern(TypeKind::Mut(base_elem))
@@ -531,22 +534,22 @@ impl<'a> ExprChecker<'a> {
     ) -> TypeId {
         self.ctx.scopes.enter_scope();
         if let Some(i) = init {
-            self.check_discarded_expr(i); 
+            self.check_discarded_expr(i);
         }
         if let Some(c) = cond {
             let c_ty = self.check_expr(c, Some(TypeId::BOOL));
             self.check_coercion(c.span, TypeId::BOOL, c_ty);
         }
         if let Some(p) = post {
-            self.check_discarded_expr(p); 
+            self.check_discarded_expr(p);
         }
-        self.check_discarded_expr(body); 
+        self.check_discarded_expr(body);
         self.ctx.scopes.exit_scope();
         TypeId::VOID
     }
 
     fn check_defer(&mut self, defer_expr: &Expr) -> TypeId {
-        self.check_discarded_expr(defer_expr); 
+        self.check_discarded_expr(defer_expr);
         TypeId::VOID
     }
 
@@ -1782,7 +1785,10 @@ impl<'a> ExprChecker<'a> {
         match kind {
             ast::DataLiteralKind::Array(elems) => {
                 // 如果里面是空的，且目标类型不是数组/切片，就把它当作空结构体处理
-                let is_target_array_like = matches!(kind_enum, TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_));
+                let is_target_array_like = matches!(
+                    kind_enum,
+                    TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_)
+                );
                 if elems.is_empty() && !is_target_array_like {
                     if is_adt {
                         self.check_adt_literal(&[], expected, exp_norm, span)

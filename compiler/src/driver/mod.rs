@@ -156,7 +156,7 @@ impl CompilerDriver {
             .arg("-no-pie")
             .arg("-o")
             .arg(&self.options.output_file);
-        
+
         if !self.options.link_libc {
             cmd.arg("-nostdlib");
         }

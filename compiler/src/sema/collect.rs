@@ -38,7 +38,12 @@ impl<'a> Collector<'a> {
         // 将模块注册与常规收集融为一体
         for decl in &module.decls {
             match &decl.kind {
-                DeclKind::Use { kind, path, target, is_reexport } => {
+                DeclKind::Use {
+                    kind,
+                    path,
+                    target,
+                    is_reexport,
+                } => {
                     imports.push(ImportDef {
                         path_kind: *kind,
                         path: path.clone(),

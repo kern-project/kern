@@ -547,9 +547,7 @@ pub enum DeclKind {
     },
 
     /// 模块声明：`mod name;`
-    ModDecl {
-        is_pub: bool,
-    },
+    ModDecl { is_pub: bool },
 
     /// 模块引入
     Use {
@@ -581,7 +579,7 @@ pub enum UsePathKind {
     /// 相对路径，从当前模块开始找：`use .utils`
     Current,
     /// 相对路径，仅支持从父级模块开始找：`use ..common`
-    Parent, 
+    Parent,
 }
 
 #[derive(Debug, Clone, PartialEq)]

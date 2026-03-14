@@ -779,9 +779,7 @@ impl<'a> Lowerer<'a> {
                 MastExprKind::Block(self.lower_block_as_body(expr, subst_map, exp_ty))
             }
 
-            ExprKind::Return(val) => {
-                self.lower_return(val.as_deref(), subst_map, expr.span)
-            }
+            ExprKind::Return(val) => self.lower_return(val.as_deref(), subst_map, expr.span),
             ExprKind::Assign { lhs, op, rhs } => self.lower_assign(lhs, *op, rhs, subst_map),
             ExprKind::GenericInstantiation { .. } => self.lower_generic_instantiation(concrete_ty),
 
@@ -1649,7 +1647,10 @@ impl<'a> Lowerer<'a> {
                 self.lower_struct_union_adt_init(fields, subst_map, concrete_ty)
             }
             ast::DataLiteralKind::Array(elems) => {
-                let is_target_array_like = matches!(norm, TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_));
+                let is_target_array_like = matches!(
+                    norm,
+                    TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_)
+                );
                 if elems.is_empty() && !is_target_array_like {
                     // 当作空结构体/联合体/ADT处理，确保它们被正确 Instantiate
                     self.lower_struct_union_adt_init(&[], subst_map, concrete_ty)

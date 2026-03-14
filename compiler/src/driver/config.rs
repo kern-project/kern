@@ -74,7 +74,7 @@ pub struct CompileOptions {
     pub emit_llvm_ir: bool,
     /// 允许通过 CLI 传入自定义环境变量，例如 kernc -D my_feature=true
     pub custom_defines: HashMap<String, String>,
-    // 模块别名映射表 
+    // 模块别名映射表
     pub module_aliases: HashMap<String, String>,
     pub asm_dialect: AsmDialect,
     pub link_libc: bool,
@@ -90,9 +90,9 @@ impl Default for CompileOptions {
             opt_level: OptLevel::O0,
             emit_llvm_ir: false,
             custom_defines: HashMap::new(),
-            module_aliases: HashMap::new(), 
+            module_aliases: HashMap::new(),
             asm_dialect: AsmDialect::default(),
-            link_libc: false, 
+            link_libc: false,
             linker_cmd: "cc".to_string(),
         }
     }

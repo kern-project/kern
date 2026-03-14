@@ -695,15 +695,18 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
                 self.builder.build_memset(d, 1, v, l).unwrap();
                 self.context.i8_type().const_zero().into() // Void 返回
             }
-            MastExprKind::SliceOp { lhs, start, end, is_inclusive } => {
-                self.compile_slice_op(
-                    lhs, 
-                    start.as_deref(), 
-                    end.as_deref(), 
-                    *is_inclusive, 
-                    expected_llvm_ty
-                )
-            }
+            MastExprKind::SliceOp {
+                lhs,
+                start,
+                end,
+                is_inclusive,
+            } => self.compile_slice_op(
+                lhs,
+                start.as_deref(),
+                end.as_deref(),
+                *is_inclusive,
+                expected_llvm_ty,
+            ),
         }
     }
 
@@ -942,8 +945,16 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
             crate::sema::ty::TypeKind::Slice(_) => {
                 // 从现有的 Fat Pointer 结构体中提取
                 let struct_val = lhs_val.into_struct_value();
-                let ptr = self.builder.build_extract_value(struct_val, 0, "s_ptr").unwrap().into_pointer_value();
-                let len = self.builder.build_extract_value(struct_val, 1, "s_len").unwrap().into_int_value();
+                let ptr = self
+                    .builder
+                    .build_extract_value(struct_val, 0, "s_ptr")
+                    .unwrap()
+                    .into_pointer_value();
+                let len = self
+                    .builder
+                    .build_extract_value(struct_val, 1, "s_len")
+                    .unwrap()
+                    .into_int_value();
                 (ptr, Some(len))
             }
             crate::sema::ty::TypeKind::Array { len, .. } => {
@@ -976,29 +987,47 @@ impl<'ctx, 'a> CodeGenerator<'ctx, 'a> {
         };
 
         // 4. 计算新切片的长度: len = end - start + (1 if inclusive)
-        let mut slice_len = self.builder.build_int_sub(end_val, start_val, "slice_len").unwrap();
+        let mut slice_len = self
+            .builder
+            .build_int_sub(end_val, start_val, "slice_len")
+            .unwrap();
         if is_inclusive {
             let one = self.context.i64_type().const_int(1, false);
-            slice_len = self.builder.build_int_add(slice_len, one, "slice_len_inc").unwrap();
+            slice_len = self
+                .builder
+                .build_int_add(slice_len, one, "slice_len_inc")
+                .unwrap();
         }
 
         // 5. 偏移基底指针: ptr = base_ptr + start
         let elem_ty = match self.type_registry.get(norm_lhs) {
-            crate::sema::ty::TypeKind::Pointer(e) | crate::sema::ty::TypeKind::VolatilePtr(e) | crate::sema::ty::TypeKind::Slice(e) => *e,
+            crate::sema::ty::TypeKind::Pointer(e)
+            | crate::sema::ty::TypeKind::VolatilePtr(e)
+            | crate::sema::ty::TypeKind::Slice(e) => *e,
             crate::sema::ty::TypeKind::Array { elem, .. } => *elem,
-            _ => unreachable!()
+            _ => unreachable!(),
         };
         let llvm_elem_ty = self.get_llvm_type(elem_ty);
-        
+
         let slice_ptr = unsafe {
-            self.builder.build_gep(llvm_elem_ty, base_ptr, &[start_val], "slice_ptr").unwrap()
+            self.builder
+                .build_gep(llvm_elem_ty, base_ptr, &[start_val], "slice_ptr")
+                .unwrap()
         };
 
         // 6. 组装并返回新的胖指针结构体
         let struct_ty = expected_llvm_ty.into_struct_type();
         let mut slice_struct = struct_ty.get_undef();
-        slice_struct = self.builder.build_insert_value(slice_struct, slice_ptr, 0, "insert_ptr").unwrap().into_struct_value();
-        slice_struct = self.builder.build_insert_value(slice_struct, slice_len, 1, "insert_len").unwrap().into_struct_value();
+        slice_struct = self
+            .builder
+            .build_insert_value(slice_struct, slice_ptr, 0, "insert_ptr")
+            .unwrap()
+            .into_struct_value();
+        slice_struct = self
+            .builder
+            .build_insert_value(slice_struct, slice_len, 1, "insert_len")
+            .unwrap()
+            .into_struct_value();
 
         slice_struct.into()
     }

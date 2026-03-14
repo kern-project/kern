@@ -2012,10 +2012,10 @@ impl<'a> Parser<'a> {
 
     fn parse_mod_decl(&mut self, start: Span, is_pub: bool) -> ParseResult<Decl> {
         self.advance(); // 消费 `mod`
-        
+
         let name_token = self.expect(TokenType::Identifier)?;
         let name_id = self.intern_token(name_token);
-        
+
         self.expect(TokenType::Semicolon)?;
         let end = self.stream.prev_span();
 
@@ -2261,8 +2261,8 @@ impl<'a> Parser<'a> {
         self.advance(); // 消费 `use`
 
         // 1. 精确且极简的起始路径解析
-        let mut kind = UsePathKind::Root; 
-        
+        let mut kind = UsePathKind::Root;
+
         if self.match_token(&[TokenType::Dot]) {
             kind = UsePathKind::Current;
         } else if self.match_token(&[TokenType::DotDot]) {
@@ -2271,7 +2271,7 @@ impl<'a> Parser<'a> {
 
         let mut path = Vec::new();
         let target: UseTarget;
-        
+
         // 2. 循环读取路径段和目标
         loop {
             if self.match_token(&[TokenType::LBrace]) {
