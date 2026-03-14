@@ -13,16 +13,14 @@ This model ensures a unified vision and prevents the language design from becomi
 Kern is written in Rust. You will need the standard Rust toolchain installed.
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/kern.git
-   cd kern
-
+```bash
+git clone https://github.com/YOUR_USERNAME/kern.git
+cd kern
 ```
 
 2. Build the compiler:
 ```bash
 cargo build
-
 ```
 
 ## Running Tests

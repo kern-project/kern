@@ -1,0 +1,10 @@
+// expected-error: field `y` is missing and has no default value
+
+type Point = struct {
+    x: i32,
+    y: i32,
+};
+
+fn main() void {
+    let p = Point.{ x: 10 }; // `y`
+}

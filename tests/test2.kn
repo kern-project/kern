@@ -1,9 +1,0 @@
-extern {
-    // 引入 C 标准库的 printf
-    fn printf(format: *u8, ...) i32;
-}
-
-fn main() i32 {
-    printf("Hello World from Kern %d.%d.%d!\n\0".[0].&, 0, 3, 0);
-    return 0;
-}

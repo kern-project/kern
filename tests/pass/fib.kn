@@ -1,3 +1,4 @@
+// expected-stdout: Hello World from Kern 0.3.9227465!
 extern {
     fn printf(format: *u8, ...) i32;
 }
@@ -9,6 +10,6 @@ fn fib(src: i64) i64 {
 
 fn main() i32 {
     let a = fib(35);
-    printf("Hello World from Kern %d.%d.%d!\n\0".[0].&, i32.{0}, i32.{3}, a);
+    let _ = printf("Hello World from Kern %d.%d.%d!\n\0".[0].&, i32.{0}, i32.{3}, a);
     return 0;
 }

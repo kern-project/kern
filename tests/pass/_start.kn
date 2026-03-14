@@ -1,3 +1,6 @@
+// compile-flags: --freestanding
+// build-only
+
 #![if(os == "linux" or os == "macos")]
 
 #[cold, export_name("_start")]

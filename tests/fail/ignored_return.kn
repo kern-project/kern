@@ -1,0 +1,10 @@
+// expected-error: error ignored non-void return value
+
+fn do_work() i32 {
+    return i32.{42};
+}
+
+fn main() void {
+    // let _ = do_work();
+    do_work(); 
+}
