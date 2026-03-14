@@ -59,19 +59,12 @@ impl CompilerDriver {
         let mut builtin = BuiltinInjector::new(&mut ctx);
         builtin.inject();
 
-        let mut asts = {
+        let asts = {
             let mut loader = crate::sema::module_loader::ModuleLoader::new(&mut ctx);
             loader.load_root(&self.options.input_file);
             std::mem::take(&mut loader.asts)
         };
 
-        if ctx.has_errors() {
-            ctx.print_diagnostics();
-            return false;
-        }
-
-        let mut pruner = crate::sema::prune::Pruner::new(&mut ctx);
-        pruner.prune_all(&mut asts);
         if ctx.has_errors() {
             ctx.print_diagnostics();
             return false;
@@ -156,16 +149,15 @@ impl CompilerDriver {
 
         println!("Linking...");
 
-        // 支持通过环境变量指定自定义交叉编译器 (如 CC=x86_64-elf-gcc)
-        let cc_compiler = std::env::var("CC").unwrap_or_else(|_| "cc".to_string());
+        let cc_compiler = self.options.linker_cmd.clone();
         let mut cmd = std::process::Command::new(&cc_compiler);
 
         cmd.arg(&obj_path_str)
             .arg("-no-pie")
             .arg("-o")
             .arg(&self.options.output_file);
-
-        if self.options.freestanding {
+        
+        if !self.options.link_libc {
             cmd.arg("-nostdlib");
         }
 
