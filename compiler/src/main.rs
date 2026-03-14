@@ -1,6 +1,7 @@
 use kernc::driver::CompilerDriver;
 use kernc::driver::config::{AsmDialect, CompileOptions, OptLevel, TargetMachine};
 use std::env;
+use std::path::PathBuf;
 use std::process;
 
 fn print_usage(program_name: &str) {
@@ -126,12 +127,44 @@ fn parse_args() -> CompileOptions {
         process::exit(1);
     }
 
-    // 如果没有手动指定 -M std=...，补齐标准库路径
+    // 自动推导标准库路径
     if !options.module_aliases.contains_key("std") {
-        // 假设编译器运行在项目根目录，标准库在 ./library/std
+        let std_path = if let Ok(custom_std) = env::var("KERN_STD_PATH") {
+            // 1. 最高优先级：用户指定的环境变量 (极其适合本地开发测试)
+            PathBuf::from(custom_std)
+        } else if let Ok(mut exe_path) = env::current_exe() {
+            // 2. 标准工具链相对路径解析
+            // 假设 exe 位于 /usr/local/kern/bin/kernc
+            exe_path.pop(); // 弹出 kernc -> 得到 bin/
+
+            // 检查是不是在 cargo run 的 target/debug/ 目录下
+            if exe_path.ends_with("debug") || exe_path.ends_with("release") {
+                // 如果是开发环境，退回到项目根目录去找 library/std
+                exe_path.pop(); // 弹出 debug
+                exe_path.pop(); // 弹出 target
+                exe_path.join("library/std")
+            } else {
+                // 生产环境工具链：弹出 bin/，进入 lib/kern/std/
+                exe_path.pop();
+                exe_path.join("lib/kern/std")
+            }
+        } else {
+            // 3. 兜底方案
+            PathBuf::from("library/std")
+        };
+
+        // 验证标准库路径是否真的存在（提供友好的错误提示）
+        if !std_path.exists() {
+            eprintln!(
+                "Warning: Standard library not found at `{}`. \n\
+                 Please set the `KERN_STD_PATH` environment variable or ensure the compiler is installed in a valid toolchain directory.",
+                std_path.display()
+            );
+        }
+
         options
             .module_aliases
-            .insert("std".to_string(), "library/std".to_string());
+            .insert("std".to_string(), std_path.to_string_lossy().to_string());
     }
 
     options

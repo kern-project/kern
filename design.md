@@ -1,4 +1,4 @@
-# Kern Language Design (v0.3.8)
+# Kern Language Design (v0.4.0)
 
 ## Table of Contents
 
@@ -54,6 +54,8 @@ To achieve “high abstraction, low policy”, Kern provides three core mechanis
 * **Optimisation that exploits undefined behaviour** – ambiguous behaviour (integer overflow, uninitialised reads) is either defined or a compile‑time error.
 
 ## 2. Type System
+
+> **Crucial Concept:** Kern employs a **Top-Down Bidirectional Type Checking** model. Before diving into the specific types, it is highly recommended to read [The Kern Type System](kern_type.md) to understand how types flow from explicitly declared "Anchors of Truth" down to literals, avoiding common pitfalls for users coming from languages with bottom-up inference (like Rust or C++).
 
 ### 2.1 Primitive Types
 
@@ -327,35 +329,62 @@ When a block `{ … }` evaluates as an expression and contains `defer` statement
 
 ## 7. Modules
 
-### 7.1 Module Resolution
+Kern's module system is designed to be explicit, highly predictable, and strictly controlled by the programmer. In v0.4.0, Kern transitioned to an explicit module tree declaration model to support robust visibility control, re-exports, and conditional compilation.
+
+### 7.1 Explicit Module Tree (`mod`)
+
+Files and directories do not implicitly become part of the compilation unit just by existing on the filesystem. A module must be explicitly declared using the `mod` keyword.
+
+* **File Modules**: `mod utils;` instructs the compiler to look for `utils.kn`.
+* **Directory Modules**: If `utils` is a directory, the compiler looks for `utils/init.kn`.
+* **Visibility**: By default, modules are private. Use `pub mod utils;` to expose the module and its public contents to outer scopes.
+
+```kern
+// Explicitly build the module tree
+mod memory;
+pub mod process;
+
+// Conditional module compilation (e.g., in std/os/init.kn)
+#[if(os == "linux")]
+mod linux;
+
+#[if(os == "windows")]
+mod windows;
+
+```
+
+### 7.2 Imports and Path Resolution (`use`)
 
 Absolute paths in Kern are resolved through two precise roots:
 
 1. **Compiler Root Directory**: The root module entry point provided to `kernc` (e.g., treating the project root similar to `crate::`).
-2. **CLI Alias Mappings**: External package paths explicitly mapped via compiler options (e.g., `-M std=./libs/std` allows `use std.io;`). This forms the foundation of the Kern package manager and standard library injection.
+2. **CLI Alias Mappings**: External package paths explicitly mapped via compiler options (e.g., `-M std=./libs/std` allows `use std.io;`).
 
-* **Relative import**: `use .utils;`, `use ..common.types;`
+Paths are navigated strictly:
 
-### 7.2 Directory Modules (`init.kn`)
+* **Absolute import**: `use std.io.File;`
+* **Relative import (Current)**: `use .utils;` (Starts from the current module)
+* **Relative import (Parent)**: `use ..common.types;` (Starts from the parent module)
+* **Grouped imports**: `use std.os.{Handle, write, exit};`
 
-A directory becomes a module if it contains `init.kn`.
+### 7.3 Facade Pattern and Re-exports (`pub use`)
 
-* **Multi-pass Type Resolution**: Kern uses multi-pass parsing. Circular type dependencies across different module files are fully supported without forward declarations.
-
-### 7.3 Idiom: Static Methods via Modules
-
-File name matches type name; module functions act as “static methods”.
+Kern supports the Facade pattern via `pub use`. This allows you to construct a clean, unified public API while keeping the internal module layout complex and conditionally compiled.
 
 ```kern
-// std/collections/ArrayList.kn
-pub type ArrayList[T] = struct { … };
-pub fn new[T]() ArrayList[T] { … }
+// std/os/init.kn
+#[if(os == "linux")]
+mod linux;
 
-// main.kn
-use std.collections.ArrayList;
-let list = ArrayList.new[i32]();
+// Re-export symbols from the private `linux` module to the public `std.os` API
+#[if(os == "linux")]
+pub use .linux.{Handle, get_stdout_handle, write, exit};
 
 ```
+
+### 7.4 Multi-Pass Resolution
+
+Kern utilizes a multi-pass Semantic Analyzer. Circular type dependencies across different module files (e.g., Module A uses a struct from Module B, which contains a pointer to a struct from Module A) are fully supported natively. There is no need for C-style forward declarations or header files.
 
 ## 8. Interoperability
 
