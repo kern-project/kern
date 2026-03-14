@@ -100,6 +100,12 @@ cargo build --release
 
 For a comprehensive dive into the language mechanics, type system, and memory rules, please read the [Kern Language Design Document](design.md).
 
+## Contributing
+
+Contributions are welcome! Whether it's reporting a bug, improving documentation, or proposing new features. Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. 
+
+**Note on language design:** Kern is a founder-led project. To maintain a cohesive language architecture, major design changes and new syntax proposals will be evaluated strictly against the founder's vision for the language. Please open an issue to discuss significant changes before writing code.
+
 ## License
 
 Kern is open-source software licensed under the [MIT License](LICENSE).
