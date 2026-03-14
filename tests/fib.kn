@@ -1,0 +1,14 @@
+extern {
+    fn printf(format: *u8, ...) i32;
+}
+
+fn fib(src: i64) i64 {
+    if (src < 2) return src;
+    return fib(src - 1) + fib(src - 2);
+}
+
+fn main() i32 {
+    let a = fib(35);
+    printf("Hello World from Kern %d.%d.%d!\n\0".[0].&, i32.{0}, i32.{3}, a);
+    return 0;
+}

@@ -780,7 +780,7 @@ impl<'a> Lowerer<'a> {
             }
 
             ExprKind::Return(val) => {
-                self.lower_return(val.as_deref(), subst_map, expected_ty, expr.span)
+                self.lower_return(val.as_deref(), subst_map, expr.span)
             }
             ExprKind::Assign { lhs, op, rhs } => self.lower_assign(lhs, *op, rhs, subst_map),
             ExprKind::GenericInstantiation { .. } => self.lower_generic_instantiation(concrete_ty),
@@ -2233,10 +2233,9 @@ impl<'a> Lowerer<'a> {
         &mut self,
         val: Option<&Expr>,
         subst_map: &HashMap<SymbolId, TypeId>,
-        expected_ty: Option<TypeId>,
         span: Span,
     ) -> MastExprKind {
-        let v = val.map(|e| Box::new(self.lower_expr(e, subst_map, expected_ty)));
+        let v = val.map(|e| Box::new(self.lower_expr(e, subst_map, None)));
         let mut defer_stmts = Vec::new();
 
         // 倒序展开当前作用域栈中所有的 defer
