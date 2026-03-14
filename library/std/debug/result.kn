@@ -1,0 +1,114 @@
+pub type Option[T] = adt {
+    Some: T,
+    None,
+};
+
+pub type Result[T,V] = adt {
+    Ok: T,
+    Err: V,
+};
+
+impl[T] Option[T] {
+    pub fn is_none() bool {
+        match (self) {
+            .Some: a => false,
+            .None => true,
+        }
+    }
+
+    pub fn is_some() bool {
+        return !self.is_none();
+    }
+
+    pub fn is_none_or(call_back: fn(T) bool) bool {
+        match (self) {
+            .None => true,
+            .Some: a => call_back(a),
+        }
+    }
+
+    pub fn is_some_and(call_back: fn(T) bool) bool {
+        match (self) {
+            .None => false,
+            .Some: a => call_back(a),
+        }
+    }
+}
+
+impl[T,V] Result[T,V] {
+    pub fn is_ok() bool {
+        match (self) {
+            .Ok: a => true,
+            .Err: b => false,
+        }
+    }
+
+    pub fn is_err() bool {
+        match (self) {
+            .Ok: a => false,
+            .Err: b => true,
+        }
+    }
+
+    pub fn ok() Option[T] {
+        match (self) {
+            .Ok: a => .{Some: a},
+            .Err: b => .{None},
+        }
+    }
+
+    pub fn err() Option[V] {
+        match (self) {
+            .Ok: a => .{None},
+            .Err: b => .{Some: b},
+        }
+    }
+
+    pub fn map[U](call_back: fn(T) U) Result[U,V] {
+        match (self) {
+            .Ok: a => .{Ok: call_back(a)},
+            .Err: b => .{Err: b},
+        }
+    }
+
+    pub fn map_or[U](default: U,call_back: fn(T) U) U {
+        match (self) {
+            .Ok: a => call_back(a),
+            .Err: b => default,
+        }
+    }
+
+    pub fn map_or_else[U](default: fn(V) U, f: fn(T) U) U {
+        match (self) {
+            .Ok: a => f(a),
+            .Err: b => default(b),
+        }
+    }
+
+    pub fn map_err[F](call_back: fn(V) F) Result[T,F]{
+        match (self) {
+            .Ok: a => .{Ok: a},
+            .Err: b => .{Err: call_back(b)}
+        }
+    }
+
+    pub fn inspect(call_back: fn(T) void) Result[T,V] {
+        match (self) {
+            .Ok: a => {
+                call_back(a);
+                self
+            },
+            .Err: b => self,
+        }
+    }
+
+    pub fn inspect_err(call_back: fn(V) void) Result[T,V] {
+        match (self) {
+            .Ok: a => self,
+            .Err: b => {
+                call_back(b);
+                self
+            },
+        }
+    }
+}
