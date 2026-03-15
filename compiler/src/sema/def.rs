@@ -80,6 +80,7 @@ pub struct ModuleDef {
     pub submodules: HashMap<SymbolId, DefId>,
     pub items: Vec<DefId>,       // 模块内定义的成员
     pub imports: Vec<ImportDef>, // 记录所有的 use 声明，留给下一阶段解析
+    pub is_init: bool,
 }
 
 #[derive(Debug, Clone)]

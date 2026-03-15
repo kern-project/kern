@@ -17,7 +17,7 @@ impl<'a> Pruner<'a> {
         }
     }
 
-    fn prune_module(&mut self, module: &mut Module) {
+    pub fn prune_module(&mut self, module: &mut Module) {
         // 处理模块级属性 #![if(...)]
         if !self.eval_attributes(&module.attributes) {
             // 如果模块级别的条件为 false，直接清空整个模块的内容

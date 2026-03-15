@@ -779,9 +779,7 @@ impl<'a> Lowerer<'a> {
                 MastExprKind::Block(self.lower_block_as_body(expr, subst_map, exp_ty))
             }
 
-            ExprKind::Return(val) => {
-                self.lower_return(val.as_deref(), subst_map, expr.span)
-            }
+            ExprKind::Return(val) => self.lower_return(val.as_deref(), subst_map, expr.span),
             ExprKind::Assign { lhs, op, rhs } => self.lower_assign(lhs, *op, rhs, subst_map),
             ExprKind::GenericInstantiation { .. } => self.lower_generic_instantiation(concrete_ty),
 
@@ -790,8 +788,26 @@ impl<'a> Lowerer<'a> {
             ExprKind::Continue => self.lower_jump(MastExprKind::Continue, expr.span),
             ExprKind::Undef => MastExprKind::Undef,
 
-            ExprKind::SliceOp { .. } => {
-                unreachable!("SliceOp should be handled or forbidden before lowering")
+            ExprKind::SliceOp {
+                lhs,
+                start,
+                end,
+                is_inclusive,
+            } => {
+                let mast_lhs = self.lower_expr(lhs, subst_map, None);
+                let mast_start = start.as_ref().map(|e| {
+                    Box::new(self.lower_expr(e, subst_map, Some(crate::sema::ty::TypeId::USIZE)))
+                });
+                let mast_end = end.as_ref().map(|e| {
+                    Box::new(self.lower_expr(e, subst_map, Some(crate::sema::ty::TypeId::USIZE)))
+                });
+
+                MastExprKind::SliceOp {
+                    lhs: Box::new(mast_lhs),
+                    start: mast_start,
+                    end: mast_end,
+                    is_inclusive: *is_inclusive,
+                }
             }
             _ => unreachable!("Unhandled ExprKind in lowering: {:?}", expr.kind),
         };
@@ -1623,12 +1639,24 @@ impl<'a> Lowerer<'a> {
         concrete_ty: TypeId,
         span: Span,
     ) -> MastExprKind {
+        let base_ty = self.strip_mut_modifier(concrete_ty);
+        let norm = self.ctx.type_registry.get(base_ty).clone();
+
         match literal {
             ast::DataLiteralKind::Struct(fields) => {
                 self.lower_struct_union_adt_init(fields, subst_map, concrete_ty)
             }
             ast::DataLiteralKind::Array(elems) => {
-                self.lower_array_init(elems, subst_map, concrete_ty)
+                let is_target_array_like = matches!(
+                    norm,
+                    TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_)
+                );
+                if elems.is_empty() && !is_target_array_like {
+                    // 当作空结构体/联合体/ADT处理，确保它们被正确 Instantiate
+                    self.lower_struct_union_adt_init(&[], subst_map, concrete_ty)
+                } else {
+                    self.lower_array_init(elems, subst_map, concrete_ty)
+                }
             }
             ast::DataLiteralKind::Repeat { value, .. } => {
                 self.lower_repeat_init(value, subst_map, concrete_ty)

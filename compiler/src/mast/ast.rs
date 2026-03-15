@@ -275,6 +275,14 @@ pub enum MastExprKind {
         val: Box<MastExpr>,
         len: Box<MastExpr>,
     },
+
+    /// 底层切片组装指令
+    SliceOp {
+        lhs: Box<MastExpr>,
+        start: Option<Box<MastExpr>>,
+        end: Option<Box<MastExpr>>,
+        is_inclusive: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -21,6 +21,10 @@ pub struct Context {
     pub node_types: HashMap<NodeId, ty::TypeId>,
     pub target: TargetMachine,
     pub custom_defines: HashMap<String, String>,
+    // 存储别名映射
+    pub module_aliases: HashMap<String, String>,
+    // 存储被加载进内存的外部包的 Root DefId
+    pub alias_roots: HashMap<SymbolId, ty::DefId>,
     pub next_node_id: u32,
     pub use_color: bool, // 缓存 TTY 状态
 }
@@ -38,6 +42,8 @@ impl Context {
             node_types: HashMap::new(),
             target: TargetMachine::default(),
             custom_defines: HashMap::new(),
+            module_aliases: HashMap::new(),
+            alias_roots: HashMap::new(),
             next_node_id: 0,
             use_color: std::io::stderr().is_terminal(), // 初始化时检测一次
         }
@@ -46,6 +52,7 @@ impl Context {
     pub fn apply_options(&mut self, options: &CompileOptions) {
         self.target = options.target.clone();
         self.custom_defines = options.custom_defines.clone();
+        self.module_aliases = options.module_aliases.clone();
     }
 
     pub fn next_node_id(&mut self) -> NodeId {

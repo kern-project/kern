@@ -1,0 +1,46 @@
+// std/os/windows.kn
+#![if(os == "windows")]
+
+// 链接 kernel32.dll 中的函数
+extern {
+    pub fn GetStdHandle(nStdHandle: i32) *mut void;
+    pub fn WriteFile(
+        hFile: *mut void, 
+        lpBuffer: *u8, 
+        nNumberOfBytesToWrite: u32, 
+        lpNumberOfBytesWritten: *mut u32, 
+        lpOverlapped: *mut void
+    ) i32;
+    pub fn ExitProcess(uExitCode: u32) void;
+    pub fn GetCommandLineA() *mut u8;
+}
+
+pub fn write_stdout(ptr: *u8, len: usize) usize {
+    // STD_OUTPUT_HANDLE 是 -11
+    let handle = GetStdHandle(-11);
+    let written = mut u32.{0};
+    
+    // Windows API 要求传入 32 位长度
+    let len_u32 = @intCast[usize, u32](len);
+    
+    let _ = WriteFile(handle, ptr, len_u32, written.&, 0 as *mut void);
+    return @intCast[u32, usize](written);
+}
+
+pub fn exit(code: i32) ! {
+    ExitProcess(@intCast[i32, u32](code));
+    @unreachable()
+}
+
+// Windows 的句柄是 void 指针
+pub type Handle = *mut u8;
+
+pub fn get_stdout_handle() Handle {
+    return GetStdHandle(-11); // STD_OUTPUT_HANDLE
+}
+
+pub fn write(handle: Handle, ptr: *u8, len: usize) usize {
+    let written = mut u32.{0};
+    let _ = WriteFile(handle, ptr, @intCast[usize, u32](len), written.&, 0 as *mut void);
+    return @intCast[u32, usize](written);
+}

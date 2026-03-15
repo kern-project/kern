@@ -30,48 +30,52 @@ impl<'a> Collector<'a> {
         self.current_module = Some(mod_id);
 
         let prev_scope = self.ctx.scopes.current_scope_id();
-        // 切换到 Loader 提前建立好的作用域
         self.ctx.scopes.set_current_scope(scope_id);
-
-        // 将子模块注入到当前作用域中！
-        for (sub_name, sub_id) in submodules {
-            let dummy_node_id = self.ctx.next_node_id();
-            self.define_symbol(
-                sub_name,
-                SymbolKind::Module,
-                dummy_node_id,
-                Some(sub_id),
-                crate::utils::Span::default(),
-                true, // 子模块在自身内部视为可见
-            );
-        }
 
         let mut item_ids = Vec::new();
         let mut imports = Vec::new();
 
+        // 将模块注册与常规收集融为一体
         for decl in &module.decls {
-            if let DeclKind::Use {
-                kind,
-                path,
-                target,
-                is_reexport,
-            } = &decl.kind
-            {
-                imports.push(ImportDef {
-                    path_kind: *kind,
-                    path: path.clone(),
-                    target: target.clone(),
-                    is_reexport: *is_reexport,
-                    span: decl.span,
-                });
-            } else if let DeclKind::ExternBlock { decls, .. } = &decl.kind {
-                for ext_decl in decls {
-                    if let Some(def_id) = self.collect_decl(ext_decl, None, true, &[]) {
+            match &decl.kind {
+                DeclKind::Use {
+                    kind,
+                    path,
+                    target,
+                    is_reexport,
+                } => {
+                    imports.push(ImportDef {
+                        path_kind: *kind,
+                        path: path.clone(),
+                        target: target.clone(),
+                        is_reexport: *is_reexport,
+                        span: decl.span,
+                    });
+                }
+                DeclKind::ModDecl { is_pub } => {
+                    if let Some(&sub_id) = submodules.get(&decl.name) {
+                        self.define_symbol(
+                            decl.name,
+                            SymbolKind::Module,
+                            decl.id,
+                            Some(sub_id),
+                            decl.span,
+                            *is_pub, // 精确提取可见性
+                        );
+                    }
+                }
+                DeclKind::ExternBlock { decls, .. } => {
+                    for ext_decl in decls {
+                        if let Some(def_id) = self.collect_decl(ext_decl, None, true, &[]) {
+                            item_ids.push(def_id);
+                        }
+                    }
+                }
+                _ => {
+                    if let Some(def_id) = self.collect_decl(decl, None, false, &[]) {
                         item_ids.push(def_id);
                     }
                 }
-            } else if let Some(def_id) = self.collect_decl(decl, None, false, &[]) {
-                item_ids.push(def_id);
             }
         }
 
@@ -80,7 +84,6 @@ impl<'a> Collector<'a> {
             m.imports = imports;
         }
 
-        // 恢复上下文
         if let Some(prev) = prev_scope {
             self.ctx.scopes.set_current_scope(prev);
         }
@@ -157,7 +160,9 @@ impl<'a> Collector<'a> {
                 );
                 None
             }
+            // 已在 collect_ast 处理
             DeclKind::Use { .. } => None,
+            DeclKind::ModDecl { .. } => None,
         }
     }
 

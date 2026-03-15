@@ -301,7 +301,10 @@ impl<'a> ExprChecker<'a> {
 
         let norm_lhs = self.strip_mut(lhs_ty);
         match self.ctx.type_registry.get(norm_lhs) {
-            TypeKind::Array { elem, .. } | TypeKind::Slice(elem) => {
+            TypeKind::Array { elem, .. }
+            | TypeKind::Slice(elem)
+            | TypeKind::Pointer(elem)
+            | TypeKind::VolatilePtr(elem) => {
                 let base_elem = *elem;
                 let slice_elem = if self.is_mut_type(lhs_ty) {
                     self.ctx.type_registry.intern(TypeKind::Mut(base_elem))
@@ -531,22 +534,22 @@ impl<'a> ExprChecker<'a> {
     ) -> TypeId {
         self.ctx.scopes.enter_scope();
         if let Some(i) = init {
-            self.check_discarded_expr(i); 
+            self.check_discarded_expr(i);
         }
         if let Some(c) = cond {
             let c_ty = self.check_expr(c, Some(TypeId::BOOL));
             self.check_coercion(c.span, TypeId::BOOL, c_ty);
         }
         if let Some(p) = post {
-            self.check_discarded_expr(p); 
+            self.check_discarded_expr(p);
         }
-        self.check_discarded_expr(body); 
+        self.check_discarded_expr(body);
         self.ctx.scopes.exit_scope();
         TypeId::VOID
     }
 
     fn check_defer(&mut self, defer_expr: &Expr) -> TypeId {
-        self.check_discarded_expr(defer_expr); 
+        self.check_discarded_expr(defer_expr);
         TypeId::VOID
     }
 
@@ -1360,8 +1363,8 @@ impl<'a> ExprChecker<'a> {
             field_ty = subst.substitute(field_ty);
         }
 
-        // Mut 传染机制：如果外层实例是 mut 的，那么它的字段默认也被标记为 mut
-        if is_target_mut {
+        // Mut 传染机制：如果外层实例是 mut 的，且字段本身不是 mut，才包装
+        if is_target_mut && !self.is_mut_type(field_ty) {
             field_ty = self.ctx.type_registry.intern(TypeKind::Mut(field_ty));
         }
         field_ty
@@ -1781,7 +1784,20 @@ impl<'a> ExprChecker<'a> {
 
         match kind {
             ast::DataLiteralKind::Array(elems) => {
-                self.check_array_literal(elems, expected, exp_norm, span)
+                // 如果里面是空的，且目标类型不是数组/切片，就把它当作空结构体处理
+                let is_target_array_like = matches!(
+                    kind_enum,
+                    TypeKind::Array { .. } | TypeKind::ArrayInfer(_) | TypeKind::Slice(_)
+                );
+                if elems.is_empty() && !is_target_array_like {
+                    if is_adt {
+                        self.check_adt_literal(&[], expected, exp_norm, span)
+                    } else {
+                        self.check_struct_or_union_literal(&[], expected, exp_norm, span)
+                    }
+                } else {
+                    self.check_array_literal(elems, expected, exp_norm, span)
+                }
             }
             ast::DataLiteralKind::Repeat { value, count } => {
                 self.check_repeat_literal(value, count, expected, exp_norm, span)
@@ -1992,6 +2008,13 @@ impl<'a> ExprChecker<'a> {
                     .get(&def_f.type_node.id)
                     .copied()
                     .unwrap_or(TypeId::ERROR);
+
+                // 如果结构体本身的字段类型就是错的，必须强制抛出异常阻断编译
+                if f_ty == TypeId::ERROR {
+                    self.ctx.struct_error(init_f.span, "internal compiler error: field type was unresolved prior to Typeck")
+                        .with_hint("this is usually caused by a failing type resolver that missed emitting a diagnostic")
+                        .emit();
+                }
 
                 // 处理泛型字段类型替换
                 if !def_generics.is_empty() && !generic_args.is_empty() {
@@ -2435,11 +2458,14 @@ impl<'a> ExprChecker<'a> {
     }
 
     pub fn strip_mut(&self, ty: TypeId) -> TypeId {
-        let norm = self.ctx.type_registry.normalize(ty);
-        if let TypeKind::Mut(inner) = self.ctx.type_registry.get(norm) {
-            *inner
-        } else {
-            norm
+        let mut current = ty;
+        loop {
+            let norm = self.ctx.type_registry.normalize(current);
+            if let TypeKind::Mut(inner) = self.ctx.type_registry.get(norm) {
+                current = *inner;
+            } else {
+                return norm;
+            }
         }
     }
 

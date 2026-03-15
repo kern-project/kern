@@ -1,17 +1,87 @@
-use ..os.linux;
+use std.os; 
 
 extern {
-    fn main() i32;
+    fn main(argc: i32, argv: **u8) i32;
 }
 
+// ==========================================
+// Linux 运行时入口 (ELF System V ABI)
+// ==========================================
+#[if(os == "linux")]
 #[export_name("_start")]
-extern fn _start() void {
-    // - 解析栈上的 argc 和 argv，
-    // - 初始化全局分配器 
-    // - 设置硬件异常处理表 (针对 Bare metal)
-    let exit_code = main();
+#[naked]
+extern fn _start_linux() void {
+    @asm(.{
+        asm: .{
+            "mov rdi, [rsp]",
+            "lea rsi, [rsp + 8]",
+            "and rsp, -16",
+            "call kern_entry",
+        },
+        clobbers: .{ "memory", "rdi", "rsi" },
+        volatile: true
+    });
+}
+
+#[if(os == "linux")]
+extern fn kern_entry(argc: usize, argv: **u8) void {
+    let argc_i32 = @intCast[usize, i32](argc);
+    let exit_code = main(argc_i32, argv);
     
-    // 3. 执行退出操作（例如 flush stdout 缓冲区等）
-    linux.exit(exit_code);
-    @trap();
+    // 调用统一的抽象接口
+    os.exit(exit_code);
+}
+
+
+// ==========================================
+// Windows 运行时入口 (PE COFF ABI)
+// ==========================================
+#[if(os == "windows")]
+// 预分配一个静态数组存放参数指针，最多支持 64 个参数。
+// 链接器会将其放在 .bss 段，程序启动时自动清零，开销极小。
+static ARGV_BUFFER = [64]*mut u8.{undef};
+
+#[if(os == "windows")]
+#[export_name("mainCRTStartup")] 
+extern fn _start_windows() void {
+    // 1. 获取 Windows 传来的完整命令行字符串指针
+    let cmd_line = os.windows.GetCommandLineA();
+    
+    let argc = mut i32.{0};
+    let i = mut usize.{0};
+    let in_word = mut bool.{false};
+    
+    // 2. 极简的就地解析器 (In-place Parser)
+    for (;;) {
+        let current_char_ptr = (cmd_line as usize + i) as *mut u8;
+        let c = current_char_ptr.*;
+        
+        if (c == u8.{0}) { // 遇到字符串末尾 \0
+            break;
+        }
+        
+        if (c == u8.{32} or c == u8.{9}) { // 空格或 Tab
+            // 截断上一个单词
+            current_char_ptr.* = u8.{0};
+            in_word = false;
+        } else {
+            if (!in_word) {
+                // 发现新单词的开头！
+                if (argc < i32.{64}) {
+                    ARGV_BUFFER.[@intCast[i32, usize](argc)] = current_char_ptr;
+                    argc += i32.{1};
+                }
+                in_word = true;
+            }
+        }
+        i += usize.{1};
+    }
+    
+    // 3. 将静态数组的首地址转换为 **u8 传递给 main
+    let argv_ptr = ARGV_BUFFER.[0].& as **u8;
+    
+    let exit_code = main(argc, argv_ptr);
+    
+    // 4. 调用统一抽象接口
+    os.exit(exit_code);
 }

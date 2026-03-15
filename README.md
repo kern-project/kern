@@ -1,11 +1,11 @@
 # Kern Programming Language
 
-> **Status:** v0.3.8 (Experimental)  
+> **Status:** v0.4.0 (Experimental)  
 > *High Abstraction, Low Policy.*
 
 Kern is a systems-level programming language explicitly designed for operating system kernels, embedded firmware, and high-performance infrastructure. 
 
-Kern is built on the observation that languages often trade off abstraction capabilities against policy constraints. Kern aims to occupy the "fourth quadrant": providing powerful, modern abstractions (like generics, ADTs, and module systems) while enforcing virtually **zero hidden runtime policies**. There are no implicit allocations, no garbage collection, no exceptions, and no closures with hidden captures.
+Kern is built on the observation that languages often trade off abstraction capabilities against policy constraints. Kern aims to occupy the "fourth quadrant": providing powerful, modern abstractions (like generics, ADTs, and explicit module systems) while enforcing virtually **zero hidden runtime policies**. There are no implicit allocations, no garbage collection, no exceptions, and no closures with hidden captures.
 
 ## Core Philosophy
 
@@ -74,17 +74,29 @@ extern fn start() ! {
 
 ## Roadmap & Current Status
 
-The compiler is currently in its `v0.3.x` series. It possesses a robust frontend pipeline, performs rigorous semantic analysis/typechecking, and generates optimized LLVM IR.
+The compiler is currently in its **`v0.4.x`** series. It possesses a robust frontend pipeline, performs rigorous two-pass semantic analysis/typechecking, and generates optimized LLVM IR.
 
-* **[Delivered] v0.1.x (Core Stabilization):** Core syntax parsing, module resolution, generics monomorphization, LLVM backend integration, and basic type checking.
-* **[Delivered] v0.2.x (Advanced Types & Control Flow):** Algebraic Data Types (ADT), exhaustive pattern matching (`match`), and stateless anonymous functions (Lambdas). *(Note: The originally proposed `class` keyword was dropped in favor of orthogonal composition via Structs and Traits).*
-* **[Delivered] v0.3.x (Meta-programming & Low-level Control):** Introduction of AST attribute markers (e.g., `#[packed]`, `#[link_section]`), compiler intrinsics (`@trap`, `@sizeOf`), and structured Inline Assembly (`@asm`).
-* **[Current Focus] v0.4.x (Standard Library Maturation):** Full bootstrapping and stabilization of the `libcore` freestanding standard library, expanding compiler intrinsics for bitwise/memory operations.
-* **v0.5.x (Ecosystem & Tooling):** CLI alias mappings for package management, enhanced error reporting, and language server (LSP) foundations.
+* **[Delivered] v0.1.x (Core Stabilization):** Core syntax parsing, basic module resolution, generics monomorphization, LLVM backend integration, and basic type checking.
+* **[Delivered] v0.2.x (Advanced Types & Control Flow):** Algebraic Data Types (ADT), exhaustive pattern matching (`match`), and stateless anonymous functions (Lambdas).
+* **[Delivered] v0.3.x (Meta-programming & Low-level Control):** AST attribute markers (e.g., `#[packed]`, `#[link_section]`), compiler intrinsics (`@trap`, `@sizeOf`), and structured Inline Assembly (`@asm`).
+* **[Delivered] v0.4.x (Standard Library & Architecture Overhaul):** Implementation of an explicit module tree system (`mod` / `pub use`), cross-platform freestanding standard library (`std`), multi-pass type resolution, universal slicing, and CLI linker controls.
+* **[Current Focus] v0.5.x (Ecosystem, Tooling & Optimization):** Package management foundations (CLI alias mappings), enhanced error reporting/diagnostics, LLVM optimization passes, and Language Server Protocol (LSP) foundations.
 
-## Building the Compiler
+## Installation
 
-The Kern compiler (`kernc`) is written in Rust. To build it from source, ensure you have the latest stable Rust toolchain installed.
+The easiest way to install Kern is via our official installation script. This script automatically downloads and installs the pre-compiled compiler and the standard library toolchain to `~/.kern`.
+
+**For Linux / macOS:**
+```bash
+curl -sSf https://raw.githubusercontent.com/softfault/kern/main/install.sh | bash
+
+```
+
+*(After installation, you may need to restart your terminal or `source ~/.bashrc` to update your PATH).*
+
+## Building from Source
+
+If you prefer to build the compiler from source or contribute to its development, ensure you have the latest stable Rust toolchain installed.
 
 ```bash
 # Clone the repository
@@ -98,11 +110,12 @@ cargo build --release
 
 ## Documentation
 
-For a comprehensive dive into the language mechanics, type system, and memory rules, please read the [Kern Language Design Document](design.md).
+* **[Kern Language Design Document](design.md)**: A comprehensive dive into the language mechanics, memory rules, and syntax.
+* **[The Kern Type System](kern_type.md)**: Essential reading for new users to understand Kern's Top-Down Bidirectional Type Checking model and how it differs from bottom-up inference languages like Rust or C++.
 
 ## Contributing
 
-Contributions are welcome! Whether it's reporting a bug, improving documentation, or proposing new features. Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. 
+Contributions are welcome! Whether it's reporting a bug, improving documentation, or proposing new features. Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Note on language design:** Kern is a founder-led project. To maintain a cohesive language architecture, major design changes and new syntax proposals will be evaluated strictly against the founder's vision for the language. Please open an issue to discuss significant changes before writing code.
 

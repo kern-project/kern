@@ -1,0 +1,9 @@
+// build-only
+
+use std.io;
+use std.runtime;
+
+extern fn main(argc: i32, argv: **u8) i32 {
+    io.println("Hello, Bare Metal Kern!: {}", .{.{"softfault".&},});
+    0
+}

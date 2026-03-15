@@ -546,6 +546,9 @@ pub enum DeclKind {
         is_extern: bool,
     },
 
+    /// 模块声明：`mod name;`
+    ModDecl { is_pub: bool },
+
     /// 模块引入
     Use {
         kind: UsePathKind,
@@ -571,9 +574,12 @@ pub enum DeclKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsePathKind {
-    Absolute, // use std.io
-    Relative, // use .utils
-    Super,    // use ..common
+    /// 绝对路径，从根模块 (Root/Crate) 开始找：`use std.io`
+    Root,
+    /// 相对路径，从当前模块开始找：`use .utils`
+    Current,
+    /// 相对路径，仅支持从父级模块开始找：`use ..common`
+    Parent,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1758,11 +1758,18 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                // 判断是否有数据绑定: `: val`
+               // 判断是否有数据绑定: `: val`
                 let mut binding = None;
                 if self.match_token(&[TokenType::Colon]) {
-                    let bind_token = self.expect(TokenType::Identifier)?;
-                    binding = Some(self.intern_token(bind_token));
+                    // 为丢弃符开绿灯
+                    if self.match_token(&[TokenType::Underscore]) {
+                        // 把它统一转换成名为 "_" 的符号存入 AST
+                        binding = Some(self.context.intern("_")); 
+                    } else {
+                        // 否则走正常的标识符解析
+                        let bind_token = self.expect(TokenType::Identifier)?;
+                        binding = Some(self.intern_token(bind_token));
+                    }
                 }
 
                 let pat_span = arm_start.to(self.stream.prev_span());
@@ -1971,6 +1978,7 @@ impl<'a> Parser<'a> {
 
         let token = self.peek();
         let decl_res = match token.tag {
+            TokenType::Mod => Ok(Some(self.parse_mod_decl(start_span, is_pub)?)),
             TokenType::Fn => Ok(Some(self.parse_fn_decl(start_span, is_pub, is_extern)?)),
             TokenType::Type => Ok(Some(
                 self.parse_type_alias_decl(start_span, is_pub, is_extern)?,
@@ -2007,6 +2015,25 @@ impl<'a> Parser<'a> {
             }
             other => other,
         }
+    }
+
+    fn parse_mod_decl(&mut self, start: Span, is_pub: bool) -> ParseResult<Decl> {
+        self.advance(); // 消费 `mod`
+
+        let name_token = self.expect(TokenType::Identifier)?;
+        let name_id = self.intern_token(name_token);
+
+        self.expect(TokenType::Semicolon)?;
+        let end = self.stream.prev_span();
+
+        Ok(Decl {
+            id: self.new_id(),
+            span: start.to(end),
+            name: name_id,
+            is_pub,
+            attributes: vec![],
+            kind: DeclKind::ModDecl { is_pub },
+        })
     }
 
     fn parse_fn_decl(&mut self, start: Span, is_pub: bool, is_extern: bool) -> ParseResult<Decl> {
@@ -2240,40 +2267,38 @@ impl<'a> Parser<'a> {
     fn parse_use_decl(&mut self, start: Span, is_pub: bool) -> ParseResult<Decl> {
         self.advance(); // 消费 `use`
 
-        let mut kind = UsePathKind::Absolute;
+        // 1. 精确且极简的起始路径解析
+        let mut kind = UsePathKind::Root;
+
         if self.match_token(&[TokenType::Dot]) {
-            kind = UsePathKind::Relative;
+            kind = UsePathKind::Current;
         } else if self.match_token(&[TokenType::DotDot]) {
-            kind = UsePathKind::Super;
+            kind = UsePathKind::Parent;
         }
 
         let mut path = Vec::new();
         let target: UseTarget;
+
+        // 2. 循环读取路径段和目标
         loop {
-            // 情况 1: 遇到纯粹的 `{` (比如 `use .{ ... }` 或者路径已经被处理完)
             if self.match_token(&[TokenType::LBrace]) {
                 target = self.parse_use_members()?;
                 break;
             }
-            // 情况 2: 核心修复，处理被 Lexer 捏合在一起的 `.{` Token
             if self.match_token(&[TokenType::DotLBrace]) {
                 target = self.parse_use_members()?;
                 break;
             }
 
-            // 正常读取路径段
             let id = self.expect(TokenType::Identifier)?;
             path.push(self.intern_token(id));
 
-            // 在路径段之后再次检查是否直接跟着 `.{`
             if self.match_token(&[TokenType::DotLBrace]) {
                 target = self.parse_use_members()?;
                 break;
             } else if self.match_token(&[TokenType::Dot]) {
-                // 如果后面跟着普通的点号，继续循环读取下一个段
                 continue;
             } else {
-                // 没有任何后缀，跳出循环，按普通模块导入处理
                 let mut alias = None;
                 if self.match_token(&[TokenType::As]) {
                     let a = self.expect(TokenType::Identifier)?;

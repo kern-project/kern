@@ -140,7 +140,7 @@ impl<'a> BuiltinInjector<'a> {
 
     // 注入 @sizeOf[T]() -> usize
     fn inject_size_of(&mut self) {
-        let name_id = self.ctx.intern("@sizeof");
+        let name_id = self.ctx.intern("@sizeOf");
         let def_id = DefId(self.ctx.defs.len() as u32);
 
         // 泛型参数 T (没有任何约束)

@@ -112,3 +112,7 @@ impl[T,V] Result[T,V] {
         }
     }
 }
+pub type Result[T, E] = adt {
+    Ok: T,
+    Err: E,
+};

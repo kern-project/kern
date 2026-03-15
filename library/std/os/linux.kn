@@ -1,4 +1,4 @@
-#![if(not os == "linux")]
+#![if(os == "linux")]
 
 // 基础的 3 参数系统调用封装
 pub fn syscall3(sys_num: usize, arg1: usize, arg2: usize, arg3: usize) usize {
@@ -31,4 +31,16 @@ pub fn exit(code: i32) ! {
     
     // exit 永不返回，使用 @unreachable 帮助编译器切断控制流图
     @unreachable()
+}
+
+// Linux 的句柄就是个 usize 整数 (fd)
+pub type Handle = usize;
+
+pub fn get_stdout_handle() Handle {
+    return usize.{1}; // Linux 的 stdout fd 是 1
+}
+
+pub fn write(handle: Handle, ptr: *u8, len: usize) usize {
+    // syscall3(SYS_write, fd, buf, count)
+    return syscall3(1, handle, ptr as usize, len);
 }

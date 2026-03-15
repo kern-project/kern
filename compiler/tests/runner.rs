@@ -19,7 +19,7 @@ fn run_tests(dir_name: &str, expect_success: bool) {
 
     // 如果目录还不存在，直接跳过，防止报错
     if !test_dir.exists() {
-        return; 
+        return;
     }
 
     let entries = fs::read_dir(test_dir).expect("Failed to read test directory");
@@ -27,7 +27,7 @@ fn run_tests(dir_name: &str, expect_success: bool) {
     for entry in entries {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
-        
+
         if path.extension().and_then(|s| s.to_str()) != Some("kn") {
             continue;
         }
@@ -54,8 +54,10 @@ fn run_tests(dir_name: &str, expect_success: bool) {
             }
         }
 
-        let out_bin = std::env::temp_dir().join(path.file_stem().unwrap()).with_extension("out");
-        
+        let out_bin = std::env::temp_dir()
+            .join(path.file_stem().unwrap())
+            .with_extension("out");
+
         let mut cmd = Command::new(compiler_path);
         cmd.arg(&path).arg("-o").arg(&out_bin);
         for flag in compile_flags {
@@ -64,7 +66,7 @@ fn run_tests(dir_name: &str, expect_success: bool) {
 
         // 读取 stderr
         let compile_output = cmd.output().expect("Failed to execute compiler");
-        
+
         if expect_success {
             assert!(
                 compile_output.status.success(),

@@ -552,6 +552,7 @@ fn resolve_keyword(text: &[u8]) -> TokenType {
         b"self" => TokenType::SelfValue,
         b"adt" => TokenType::Adt,
         b"match" => TokenType::Match,
+        b"mod" => TokenType::Mod,
         _ => TokenType::Identifier,
     }
 }

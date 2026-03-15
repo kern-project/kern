@@ -1,0 +1,54 @@
+use ..traits.Writer;
+use ..traits.Printable;
+use ..File;
+use ..stdout;
+
+
+/// 通用的格式化引擎
+pub fn format_to(writer: mut Writer, fmt: []u8, args: []mut Printable) void {
+    let fmt_len = #fmt;
+    let arg_idx = 0;
+    let last_pos = 0;
+    let i = 0;
+
+    for (; i < fmt_len; ) {
+        if (fmt.[i] == 123) {
+            if (i + 1 < fmt_len) {
+                if (fmt.[i + 1] == 125) {
+                    if (i > last_pos) {
+                        let text_slice = fmt.[last_pos .. i];
+                        let _ = writer.write(text_slice);
+                    }
+                    if (arg_idx < #args) {
+                        args.[arg_idx].fmt(writer);
+                        arg_idx += 1;
+                    } else {
+                        let _ = writer.write("<missing>");
+                    }
+                    i += 2;
+                    last_pos = i;
+                    continue; 
+                }
+            }
+        }
+        i += usize.{1};
+    }
+
+    if (last_pos < fmt_len) {
+        let tail_slice = fmt.[last_pos .. fmt_len];
+        let _ = writer.write(tail_slice);
+    }
+}
+
+pub fn print(fmt: []u8, args: []mut Printable) void {
+    let out_file = mut File.{stdout()}; 
+    let writer = mut Writer.{ out_file.& };
+    format_to(writer, fmt, args);
+}
+
+pub fn println(fmt: []u8, args: []mut Printable) void {
+    let out_file = mut File.{stdout()};
+    let writer = mut Writer.{ out_file.& };
+    format_to(writer, fmt, args);
+    let _ = writer.write("\n");
+}

@@ -50,6 +50,7 @@ pub enum TokenType {
     SelfValue,
     Adt,   // adt
     Match, // match
+    Mod,
 
     // === 运算符 ===
 

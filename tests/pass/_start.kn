@@ -1,4 +1,3 @@
-// compile-flags: --freestanding
 // build-only
 
 #![if(os == "linux" or os == "macos")]
