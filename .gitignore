@@ -12,3 +12,4 @@ website/dist/
 website/node_modules/
 website/public/docs-data/
 website/src/generated/docs.ts
+*.o

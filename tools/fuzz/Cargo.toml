@@ -1,0 +1,10 @@
+[package]
+name = "kernfuzz"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "GPL-3.0-or-later"
+
+[dependencies]
+rand = "0.10.1"
+rand_chacha = "0.10.0"
