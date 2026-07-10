@@ -23,6 +23,7 @@ enum Command {
     Doctor(DoctorArgs),
     Doc(DocArgs),
     Target,
+    Version,
     Help,
 }
 
@@ -86,6 +87,10 @@ fn run() -> OpsResult<()> {
             println!("{}", detect_host_target()?.archive_target);
             Ok(())
         }
+        Command::Version => {
+            println!("kernup v{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Command::Help => {
             print!("{}", help().render(ColorChoice::Auto));
             Ok(())
@@ -105,6 +110,7 @@ fn parse_args(args: Vec<String>) -> OpsResult<Command> {
         "doc" => parse_doc_args(&args[1..]).map(Command::Doc),
         "target" => Ok(Command::Target),
         "help" | "--help" | "-h" => Ok(Command::Help),
+        "--version" | "-V" => Ok(Command::Version),
         other => Err(OpsError::new(format!(
             "unknown command `{other}`; run `kernup help`"
         ))),

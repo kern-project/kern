@@ -7,6 +7,8 @@ __pycache__/
 /kern-*.tar.gz
 /kern-*.zip
 /kern-*.sha256
+/kernup-*/
+/kernup-*.zip
 .idea
 website/dist/
 website/node_modules/
